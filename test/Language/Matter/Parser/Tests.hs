@@ -10,7 +10,9 @@ import Language.Matter.Parser qualified as P
 import Language.Matter.Tokenizer
 import Language.Matter.Tokenizer.Tests (printWithPositions)
 import Language.Matter.SyntaxTree qualified as ST
+import Language.Matter.SyntaxTree.Generator (generateMatter)
 import System.Exit (exitFailure)
+import Test.QuickCheck qualified as QC
 
 tests :: IO ()
 tests = do
@@ -21,6 +23,8 @@ tests = do
     unless (0 == count) $ do
         putStrLn $ show count ++ " failing test case" ++ if 1 == count then "" else "s" ++ "."
         exitFailure
+
+    QC.sample' (QC.sized $ \sz -> (,) sz <$> generateMatter) >>= mapM_ (\(sz, x) -> do putStrLn ""; print sz; print (x :: ST.Matter ST.P NonEmpty []))
 
 -----
 

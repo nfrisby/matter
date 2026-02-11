@@ -10,6 +10,9 @@ module Language.Matter.SyntaxTree (module Language.Matter.SyntaxTree) where
 import Data.Functor.Foldable qualified as F
 import Language.Matter.Tokenizer.Counting (D10, Four, Four')
 
+-- | Isomorph of @()@, easier on the eyes
+data P = MkP
+
 data Matter pos neseq seq =
     Flat (Flat pos neseq)
   |
@@ -17,9 +20,9 @@ data Matter pos neseq seq =
   |
     Sequence !pos (seq (SequencePart pos (Matter pos neseq seq))) !pos
   |
-    MetaGT !pos (Matter pos neseq seq) !pos (Matter pos neseq seq)
+    MetaGT !pos (Matter pos neseq seq) !pos (Matter pos neseq seq)   -- TODO
   |
-    Paren !pos (Matter pos neseq seq) !pos !Pin
+    Paren !pos (Matter pos neseq seq) !pos !Pin   -- TODO this Pin should be folded into MetaGT, not free
   |
     PinMetaLT !pos (Matter pos neseq seq) !pos !Pin !pos (Matter pos neseq seq) !pos
 
@@ -71,6 +74,7 @@ data SequencePart pos a =
 
 -----
 
+deriving instance Show P
 deriving instance (Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos (Matter pos neseq seq)))) => Show (Matter pos neseq seq)
 deriving instance Show Pin
 deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Flat pos neseq)
@@ -105,7 +109,7 @@ data MatterF pos neseq seq a =
 deriving instance Functor seq => Functor (MatterF pos neseq seq)
 
 -- | Project one layer of 'MatterF'
-project :: Functor seq => Matter pos neseq seq -> MatterF pos neseq seq (Matter pos neseq seq)
+project :: Matter pos neseq seq -> MatterF pos neseq seq (Matter pos neseq seq)
 {-# INLINE project #-}
 project = \case
     Flat flt -> FlatF flt
@@ -116,7 +120,7 @@ project = \case
     PinMetaLT l1 x r1 pin l2 y r2 -> PinMetaLtF l1 x r1 pin l2 y r2
 
 -- | Inverse of 'project'
-embed :: Functor seq => MatterF pos neseq seq (Matter pos neseq seq) -> Matter pos neseq seq
+embed :: MatterF pos neseq seq (Matter pos neseq seq) -> Matter pos neseq seq
 {-# INLINE embed #-}
 embed = \case
     FlatF flt -> Flat flt

@@ -45,6 +45,21 @@ library
     hs-source-dirs:   src
     default-language: Haskell2010
 
+library matter-testlib
+    import:           warnings
+    exposed-modules:
+        Language.Matter.SyntaxTree.Generator
+    -- other-modules:
+    -- other-extensions:
+    build-depends:
+        base ^>=4.21.0.0,
+        combinat,
+        matter,
+        QuickCheck,
+        splitmix,
+    hs-source-dirs:   testlib
+    default-language: Haskell2010
+
 test-suite matter-test
     import:           warnings
     default-language: Haskell2010
@@ -57,5 +72,7 @@ test-suite matter-test
     main-is:          Main.hs
     build-depends:
         base ^>=4.21.0.0,
+        QuickCheck,
         matter,
+        matter-testlib,
         text,
