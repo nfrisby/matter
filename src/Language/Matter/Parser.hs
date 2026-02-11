@@ -307,14 +307,14 @@ snoc l r = curry $ \case
     (stk, SdToken SdCloseParen) -> do
         case simplify stk of
             OpenParen p1 (Just m) stk' ->
-                push stk' $ parseAlgebra $ ST.ParenF p1 m l ST.NoPin
+                push stk' $ parseAlgebra $ ST.ParenF p1 m l
             OpenPin p1 (Just m) stk'' ->
                 Just $ Pin p1 m l ST.NoPin stk''
             _ -> Nothing
     (stk, SdToken SdClosePin) -> do
         case simplify stk of
             OpenParen p1 (Just m) (MetaGT_ l1 m' r1 stk') ->
-                push stk' $ parseAlgebra $ ST.MetaGtF l1 (parseAlgebra $ ST.ParenF p1 m l ST.YesPin) r1 m'
+                push stk' $ parseAlgebra $ ST.MetaGtF l1 m' r1 (ST.YesPin' p1 m l)
             OpenPin p1 (Just m) stk'@MetaGT_{} ->
                 Just $ Pin p1 m l ST.YesPin stk'
             _ -> Nothing
@@ -440,7 +440,7 @@ push = flip $ \m -> \case
             Nothing -> Just $ OpenMetaGT p (Just m) stk
             Just{} -> Nothing
     MetaGT_ l m' r stk ->
-      push stk $ parseAlgebra $ ST.MetaGtF l m' r m
+      push stk $ parseAlgebra $ ST.MetaGtF l m' r (ST.NoPin' m)
     OpenParen p mb stk ->
         case mb of
             Nothing -> Just $ OpenParen p (Just m) stk

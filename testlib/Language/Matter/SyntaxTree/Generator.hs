@@ -99,7 +99,7 @@ generateParen :: QC.Gen (Matter P NonEmpty [])
 generateParen =
     QC.sized $ \sz -> do
         x <- QC.resize (max 1 sz - 1) generateMatter
-        pure $ Paren MkP x MkP NoPin
+        pure $ Paren MkP x MkP
 
 generateMetaGT :: QC.Gen (Matter P NonEmpty [])
 generateMetaGT =
@@ -107,8 +107,8 @@ generateMetaGT =
         (l, r) <- sizeHalves $ sz - 1
         x <- QC.resize l generateMatter
         y <- frequency $
-            (  (10  ,                                    QC.resize  r      generateMatter)            NE.:|)
-          $ ([ ( 1, (\y' -> Paren MkP y' MkP YesPin) <$> QC.resize (r - 1) generateMatter) | r <= 2 ] ++)
+            (  (10  ,      NoPin'             <$> QC.resize  r      generateMatter)            NE.:|)
+          $ ([ ( 1, (\y -> YesPin' MkP y MkP) <$> QC.resize (r - 1) generateMatter) | r <= 2 ] ++)
           $ []
         pure $ MetaGT MkP x MkP y
 

@@ -20,11 +20,13 @@ data Matter pos neseq seq =
   |
     Sequence !pos (seq (SequencePart pos (Matter pos neseq seq))) !pos
   |
-    MetaGT !pos (Matter pos neseq seq) !pos (Matter pos neseq seq)   -- TODO
+    MetaGT !pos (Matter pos neseq seq) !pos !(Pin' pos ((Matter pos neseq seq)))
   |
-    Paren !pos (Matter pos neseq seq) !pos !Pin   -- TODO this Pin should be folded into MetaGT, not free
+    Paren !pos (Matter pos neseq seq) !pos
   |
     PinMetaLT !pos (Matter pos neseq seq) !pos !Pin !pos (Matter pos neseq seq) !pos
+
+data Pin' pos a = NoPin' a | YesPin' !pos a !pos
 
 data Pin = NoPin | YesPin
 
@@ -77,6 +79,7 @@ data SequencePart pos a =
 deriving instance Show P
 deriving instance (Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos (Matter pos neseq seq)))) => Show (Matter pos neseq seq)
 deriving instance Show Pin
+deriving instance (Show pos, Show a) => Show (Pin' pos a)
 deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Flat pos neseq)
 deriving instance Show pos => Show (MaybeFraction pos)
 deriving instance Show pos => Show (MaybeExponent pos)
@@ -88,6 +91,7 @@ deriving instance Show pos => Show (Escape pos)
 deriving instance Show pos => Show (MoreBytes pos)
 deriving instance (Show pos, Show a) => Show (SequencePart pos a)
 
+deriving instance Functor (Pin' pos)
 deriving instance Functor (SequencePart pos)
 
 -----
@@ -100,9 +104,9 @@ data MatterF pos neseq seq a =
   |
     SequenceF !pos (seq (SequencePart pos a)) !pos
   |
-    MetaGtF !pos a !pos a
+    MetaGtF !pos a !pos !(Pin' pos a)
   |
-    ParenF !pos a !pos !Pin
+    ParenF !pos a !pos
   |
     PinMetaLtF !pos a !pos !Pin !pos a !pos
 
@@ -116,7 +120,7 @@ project = \case
     Variant l r x -> VariantF l r x
     Sequence l xs r -> SequenceF l xs r
     MetaGT l x r y -> MetaGtF l x r y
-    Paren l x r pin -> ParenF l x r pin
+    Paren l x r -> ParenF l x r
     PinMetaLT l1 x r1 pin l2 y r2 -> PinMetaLtF l1 x r1 pin l2 y r2
 
 -- | Inverse of 'project'
@@ -127,7 +131,7 @@ embed = \case
     VariantF l r x -> Variant l r x
     SequenceF l xs r -> Sequence l xs r
     MetaGtF l x r y -> MetaGT l x r y
-    ParenF l x r pin -> Paren l x r pin
+    ParenF l x r -> Paren l x r
     PinMetaLtF l1 x r1 pin l2 y r2 -> PinMetaLT l1 x r1 pin l2 y r2
 
 type instance F.Base (Matter pos neseq seq) = MatterF pos neseq seq
@@ -150,5 +154,5 @@ mapSequence f = \case
     VariantF l r x -> VariantF l r x
     SequenceF l xs r -> SequenceF l (f xs) r
     MetaGtF l x r y -> MetaGtF l x r y
-    ParenF l x r pin -> ParenF l x r pin
+    ParenF l x r -> ParenF l x r
     PinMetaLtF l1 x r1 pin l2 y r2 -> PinMetaLtF l1 x r1 pin l2 y r2
