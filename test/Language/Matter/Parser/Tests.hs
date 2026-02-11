@@ -116,7 +116,7 @@ doesItPass (MkTestCase s expected) = do
 
 -----
 
-type M = ST.Matter Pos [] NonEmpty
+type M = ST.Matter Pos NonEmpty []
 
 data ParseResult =
     ParseDone M
@@ -128,7 +128,7 @@ data ParseResult =
 
 parseWhole :: MatterStream a => a -> ParseResult
 parseWhole x =
-    case P.snocs (P.Empty Nothing) x of
+    case P.snocs P.emptyStk x of
         P.SnocsDone stk k -> case eofTokenizer k of
             EofNothing -> case P.eof stk of
                 Nothing -> ParseStuck (tokenizerStart k) Nothing (tokenizerCurrent k) stk

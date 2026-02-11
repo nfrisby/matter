@@ -1,22 +1,27 @@
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Language.Matter.SyntaxTree (module Language.Matter.SyntaxTree) where
 
+import Data.Functor.Foldable qualified as F
 import Language.Matter.Tokenizer.Counting (D10, Four, Four')
 
-data Matter pos seq neseq =
+data Matter pos neseq seq =
     Flat (Flat pos neseq)
   |
-    Variant !pos !pos (Matter pos seq neseq)
+    Variant !pos !pos (Matter pos neseq seq)
   |
-    Sequence !pos (seq (SequencePart pos seq neseq)) !pos
+    Sequence !pos (seq (SequencePart pos (Matter pos neseq seq))) !pos
   |
-    MetaGT !pos (Matter pos seq neseq) !pos (Matter pos seq neseq)
+    MetaGT !pos (Matter pos neseq seq) !pos (Matter pos neseq seq)
   |
-    Paren !pos (Matter pos seq neseq) !pos !Pin
+    Paren !pos (Matter pos neseq seq) !pos !Pin
   |
-    PinMetaLT !pos (Matter pos seq neseq) !pos !Pin !pos (Matter pos seq neseq) !pos
+    PinMetaLT !pos (Matter pos neseq seq) !pos !Pin !pos (Matter pos neseq seq) !pos
 
 data Pin = NoPin | YesPin
 
@@ -59,14 +64,14 @@ data Escape pos = MkEscape !pos !Four
 
 -----
 
-data SequencePart pos seq neseq =
-    Item !(Matter pos seq neseq)
+data SequencePart pos a =
+    Item a
   |
-    MetaEQ !pos !(Matter pos seq neseq) !pos
+    MetaEQ !pos a !pos
 
 -----
 
-deriving instance (Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos seq neseq))) => Show (Matter pos seq neseq)
+deriving instance (Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos (Matter pos neseq seq)))) => Show (Matter pos neseq seq)
 deriving instance Show Pin
 deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Flat pos neseq)
 deriving instance Show pos => Show (MaybeFraction pos)
@@ -77,4 +82,69 @@ deriving instance (Show pos, Show (neseq (Escape pos))) => Show (MoreText pos ne
 deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Joiner pos neseq)
 deriving instance Show pos => Show (Escape pos)
 deriving instance Show pos => Show (MoreBytes pos)
-deriving instance (Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos seq neseq))) => Show (SequencePart pos seq neseq)
+deriving instance (Show pos, Show a) => Show (SequencePart pos a)
+
+deriving instance Functor (SequencePart pos)
+
+-----
+
+-- | The 'F.Base' functor of 'Matter'
+data MatterF pos neseq seq a =
+    FlatF (Flat pos neseq)
+  |
+    VariantF !pos !pos a
+  |
+    SequenceF !pos (seq (SequencePart pos a)) !pos
+  |
+    MetaGtF !pos a !pos a
+  |
+    ParenF !pos a !pos !Pin
+  |
+    PinMetaLtF !pos a !pos !Pin !pos a !pos
+
+deriving instance Functor seq => Functor (MatterF pos neseq seq)
+
+-- | Project one layer of 'MatterF'
+project :: Functor seq => Matter pos neseq seq -> MatterF pos neseq seq (Matter pos neseq seq)
+{-# INLINE project #-}
+project = \case
+    Flat flt -> FlatF flt
+    Variant l r x -> VariantF l r x
+    Sequence l xs r -> SequenceF l xs r
+    MetaGT l x r y -> MetaGtF l x r y
+    Paren l x r pin -> ParenF l x r pin
+    PinMetaLT l1 x r1 pin l2 y r2 -> PinMetaLtF l1 x r1 pin l2 y r2
+
+-- | Inverse of 'project'
+embed :: Functor seq => MatterF pos neseq seq (Matter pos neseq seq) -> Matter pos neseq seq
+{-# INLINE embed #-}
+embed = \case
+    FlatF flt -> Flat flt
+    VariantF l r x -> Variant l r x
+    SequenceF l xs r -> Sequence l xs r
+    MetaGtF l x r y -> MetaGT l x r y
+    ParenF l x r pin -> Paren l x r pin
+    PinMetaLtF l1 x r1 pin l2 y r2 -> PinMetaLT l1 x r1 pin l2 y r2
+
+type instance F.Base (Matter pos neseq seq) = MatterF pos neseq seq
+instance Functor seq => F.Recursive (Matter pos neseq seq) where project = project
+instance Functor seq => F.Corecursive (Matter pos neseq seq) where embed = embed
+
+-- | Specialization of 'F.fold' from "Data.Functor.Foldable"
+fold :: Functor seq => (MatterF pos neseq seq a -> a) -> Matter pos neseq seq -> a
+{-# INLINE fold #-}
+fold = F.fold
+
+-- | Specialization of 'F.unfold' from "Data.Functor.Foldable"
+unfold :: Functor seq => (a -> MatterF pos neseq seq a) -> a -> Matter pos neseq seq
+unfold = F.unfold
+
+mapSequence :: (seq (SequencePart pos a) -> seq' (SequencePart pos a)) -> MatterF pos neseq seq a -> MatterF pos neseq seq' a
+{-# INLINE mapSequence #-}
+mapSequence f = \case
+    FlatF flt -> FlatF flt
+    VariantF l r x -> VariantF l r x
+    SequenceF l xs r -> SequenceF l (f xs) r
+    MetaGtF l x r y -> MetaGtF l x r y
+    ParenF l x r pin -> ParenF l x r pin
+    PinMetaLtF l1 x r1 pin l2 y r2 -> PinMetaLtF l1 x r1 pin l2 y r2

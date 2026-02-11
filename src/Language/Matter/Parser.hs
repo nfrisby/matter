@@ -9,7 +9,21 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Language.Matter.Parser (module Language.Matter.Parser) where
+module Language.Matter.Parser (
+    MatterParse (..),
+
+    Stk,
+    emptyStk,
+    pop,
+    push,
+    simplify,
+    simplifyMaybe,
+
+    SnocsResult (..),
+    eof,
+    snoc,
+    snocs,
+  ) where
 
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
@@ -84,8 +98,6 @@ data Flat :: FLAT -> Type where
 
 -----
 
-type M = ST.Matter Pos [] NonEmpty
-
 -- | Every frame except 'Flat' and 'Pin' must be followed by matter
 --
 -- The Maybe M arguments are only useful so that push can
@@ -101,10 +113,10 @@ data Stk a =
     OpenVariant Pos Pos (Stk a)   -- ^ won't pop
   |
     -- | [ a b c
-    OpenSequence Pos (Matters a) (Stk a)   -- ^ won't pop
+    OpenSequence Pos (MatterSeq a (ST.SequencePart Pos a)) (Stk a)   -- ^ won't pop
   |
     -- | [ a b c {=
-    SequenceOpenMetaEQ Pos (Matters a) Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    SequenceOpenMetaEQ Pos (MatterSeq a (ST.SequencePart Pos a)) Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | {> and {> a
     OpenMetaGT Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
@@ -126,41 +138,28 @@ data Stk a =
 
 -- | A data type the parser knows how to construct
 class MatterParse a where
-    -- | The 'ST.SequencePart's accumulated while parsing a
-    -- 'ST.Sequence'.
-    data Matters a
+    type MatterSeq a :: Type -> Type
 
-    flat :: ST.Flat Pos NonEmpty -> a
+    parseAlgebra :: ST.MatterF Pos NonEmpty (MatterSeq a) a -> a
 
-    variant :: Pos -> Pos -> a -> a
+    emptyMatterSeq :: MatterSeq a (ST.SequencePart Pos a)
+    snocMatterSeq ::
+        MatterSeq a (ST.SequencePart Pos a)
+     ->
+        ST.SequencePart Pos a
+     ->
+        MatterSeq a (ST.SequencePart Pos a)
 
-    emptyMatters :: Matters a
-    item :: Matters a -> a -> Matters a
-    metaEQ :: Matters a -> Pos -> a -> Pos -> Matters a
-    fromMatters :: Pos -> Matters a -> Pos -> a
+emptyStk :: Stk a
+emptyStk = Empty Nothing
 
-    metaGT :: Pos -> a -> Pos -> a -> a
-    paren :: Pos -> a -> Pos -> ST.Pin -> a
-    pinMetaLT :: Pos -> a -> Pos -> ST.Pin -> Pos -> a -> Pos -> a
+instance MatterParse (ST.Matter Pos NonEmpty []) where
+    type MatterSeq (ST.Matter Pos NonEmpty []) = []
 
-instance MatterParse (ST.Matter Pos [] NonEmpty) where
-    newtype Matters _ = MkMatters [ST.SequencePart Pos [] NonEmpty]
+    parseAlgebra = ST.embed . ST.mapSequence reverse
 
-    flat = ST.Flat
-
-    variant = ST.Variant
-
-    emptyMatters = MkMatters []
-    item (MkMatters acc) m = MkMatters $ ST.Item m : acc
-    metaEQ (MkMatters acc) p2 m l = MkMatters $ ST.MetaEQ p2 m l : acc
-    fromMatters p1 (MkMatters acc) p2 =
-        ST.Sequence p1 (reverse acc) p2
-
-    metaGT = ST.MetaGT
-    paren = ST.Paren
-    pinMetaLT = ST.PinMetaLT
-
-deriving instance Show (Matters (ST.Matter Pos [] NonEmpty))
+    emptyMatterSeq = []
+    snocMatterSeq = flip (:)
 
 snoc :: MatterParse a => Pos -> Pos -> Stk a -> Token -> Maybe (Stk a)
 snoc l r = curry $ \case
@@ -169,9 +168,9 @@ snoc l r = curry $ \case
     (Flat (IntegerPart l1 r1) stk, OdToken OdFractionPart) ->
         Just $ Flat (FractionPart l r $ IntegerPart l1 r1) stk
     (Flat (FractionPart l2 r2 (IntegerPart l1 r1)) stk, OdToken OdExponentPart) ->
-        push stk $ flat $ ST.Number l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent l r)
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent l r)
     (Flat (IntegerPart l1 r1) stk, OdToken OdExponentPart) ->
-        push stk $ flat $ ST.Number l1 r1 ST.NothingFraction (ST.JustExponent l r)
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number l1 r1 ST.NothingFraction (ST.JustExponent l r)
 
     (_stk, OdToken OdFractionPart) -> Nothing
     (_stk, OdToken OdExponentPart) -> Nothing
@@ -252,7 +251,7 @@ snoc l r = curry $ \case
 
     -- @
     (stk, OdToken OdAtom) ->
-        push stk $ flat $ ST.Atom l r
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Atom l r
     -- 0
     (stk, OdToken OdIntegerPart) ->
         Just $ Flat (IntegerPart l r) $ simplify stk
@@ -274,11 +273,11 @@ snoc l r = curry $ \case
         Just $ OpenVariant l r $ simplify stk
     -- [ ]
     (stk, SdToken SdOpenSeq) ->
-        Just $ OpenSequence l emptyMatters $ simplify stk
+        Just $ OpenSequence l emptyMatterSeq $ simplify stk
     (stk, SdToken SdCloseSeq) ->
         case simplify stk of
             OpenSequence p1 acc stk' ->
-                push stk' $ fromMatters p1 acc l
+                push stk' $ parseAlgebra $ ST.SequenceF p1 acc l
             _ -> Nothing
     -- {= =}
     (stk, SdToken (SdOpenMeta EQ)) -> do
@@ -289,7 +288,7 @@ snoc l r = curry $ \case
     (stk, SdToken (SdCloseMeta EQ)) -> do
         case simplify stk of
             SequenceOpenMetaEQ p1 acc p2 (Just m) stk' ->
-                Just $ OpenSequence p1 (metaEQ acc p2 m l) stk'
+                Just $ OpenSequence p1 (snocMatterSeq acc $ ST.MetaEQ p2 m l) stk'
             _ -> Nothing
     -- {> >}
     (stk, SdToken (SdOpenMeta GT)) ->
@@ -308,14 +307,14 @@ snoc l r = curry $ \case
     (stk, SdToken SdCloseParen) -> do
         case simplify stk of
             OpenParen p1 (Just m) stk' ->
-                push stk' $ paren p1 m l ST.NoPin
+                push stk' $ parseAlgebra $ ST.ParenF p1 m l ST.NoPin
             OpenPin p1 (Just m) stk'' ->
                 Just $ Pin p1 m l ST.NoPin stk''
             _ -> Nothing
     (stk, SdToken SdClosePin) -> do
         case simplify stk of
             OpenParen p1 (Just m) (MetaGT_ l1 m' r1 stk') ->
-                push stk' $ metaGT l1 (paren p1 m l ST.YesPin) r1 m'
+                push stk' $ parseAlgebra $ ST.MetaGtF l1 (parseAlgebra $ ST.ParenF p1 m l ST.YesPin) r1 m'
             OpenPin p1 (Just m) stk'@MetaGT_{} ->
                 Just $ Pin p1 m l ST.YesPin stk'
             _ -> Nothing
@@ -323,7 +322,7 @@ snoc l r = curry $ \case
     (stk, SdToken (SdCloseMeta LT)) -> do
         case simplify stk of
             PinOpenMetaLT l1 m r1 pin p2 (Just m') stk' ->
-                push stk' $ pinMetaLT l1 m r1 pin p2 m' l
+                push stk' $ parseAlgebra $ ST.PinMetaLtF l1 m r1 pin p2 m' l
             _ -> Nothing
 
 emptyJoiner :: Pos -> Pos -> Bool
@@ -365,18 +364,18 @@ pop = \case
     
 popFlat :: MatterParse a => Flat x -> Maybe a
 popFlat = \case
-    IntegerPart l r -> Just $ flat $ ST.Number l r ST.NothingFraction ST.NothingExponent
-    FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ flat $ ST.Number l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
+    IntegerPart l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number l r ST.NothingFraction ST.NothingExponent
+    FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
     Suppressor{} -> Nothing
-    x@Text{} -> Just $ flat $ ST.Text $ popT ST.NoMoreText x
+    x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text $ popT ST.NoMoreText x
     SdJoiner{} -> Nothing
     OdJoiner{} -> Nothing
     Escape{} -> Nothing
     MoreSuppressor{} -> Nothing
-    x@MoreText{} -> Just $ flat $ ST.Text $ popT ST.NoMoreText x
-    x@Bytes{} -> Just $ flat $ popBytes ST.NoMoreBytes x
+    x@MoreText{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text $ popT ST.NoMoreText x
+    x@Bytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes ST.NoMoreBytes x
     BytesJoiner{} -> Nothing
-    x@MoreBytes{} -> Just $ flat $ popBytes ST.NoMoreBytes x
+    x@MoreBytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes ST.NoMoreBytes x
 
 popT :: ST.MoreText Pos NonEmpty -> Flat T -> ST.Text Pos NonEmpty
 popT acc = \case
@@ -429,9 +428,9 @@ push = flip $ \m -> \case
     Flat{} ->
         Nothing
     OpenVariant l r stk ->
-        push stk $ variant l r m
+        push stk $ parseAlgebra $ ST.VariantF l r m
     OpenSequence p acc stk ->
-        Just $ OpenSequence p (item acc m) stk
+        Just $ OpenSequence p (snocMatterSeq acc $ ST.Item m) stk
     SequenceOpenMetaEQ p1 acc p2 mb stk ->
         case mb of
             Nothing -> Just $ SequenceOpenMetaEQ p1 acc p2 (Just m) stk
@@ -441,7 +440,7 @@ push = flip $ \m -> \case
             Nothing -> Just $ OpenMetaGT p (Just m) stk
             Just{} -> Nothing
     MetaGT_ l m' r stk ->
-      push stk $ metaGT l m' r m
+      push stk $ parseAlgebra $ ST.MetaGtF l m' r m
     OpenParen p mb stk ->
         case mb of
             Nothing -> Just $ OpenParen p (Just m) stk
@@ -487,7 +486,7 @@ eof = (. simplify) $ \case
 -- Copied from -ddump-deriv in a throwaway module where I simply
 -- removed the type index from Flat.
 
-instance (Show (Matters a), Show a) => Show (Stk a) where
+instance (Show (MatterSeq a (ST.SequencePart Pos a)), Show a) => Show (Stk a) where
     showsPrec p (Empty x)
       = showParen
           (p >= 11)
