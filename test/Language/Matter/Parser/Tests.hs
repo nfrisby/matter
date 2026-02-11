@@ -116,10 +116,12 @@ doesItPass (MkTestCase s expected) = do
 
 -----
 
+type M = ST.Matter Pos [] NonEmpty
+
 data ParseResult =
-    ParseDone (ST.Matter Pos [] NonEmpty)
+    ParseDone M
   |
-    ParseStuck Pos (Maybe Token) Pos P.Stk
+    ParseStuck Pos (Maybe Token) Pos (P.Stk M)
   |
     TokenizerError Pos Pos (Either SnocError EofError)
   deriving (Show)

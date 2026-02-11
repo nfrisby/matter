@@ -5,6 +5,9 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Language.Matter.Parser (module Language.Matter.Parser) where
 
@@ -88,63 +91,98 @@ type M = ST.Matter Pos [] NonEmpty
 -- The Maybe M arguments are only useful so that push can
 -- succeed. Every function that simply ends with a call to 'push'
 -- would have to be more complicated without these.
-data Stk =
+data Stk m =
     -- | @Nothing@ is initial state, @Just@ is accepting state
-    Empty (Maybe M)   -- ^ never pops, since that'd be useless
+    Empty (Maybe m)   -- ^ never pops, since that'd be useless
   |
-    forall x. Show (Flat x) => Flat (Flat x) Stk   -- ^ might pop
+    forall x. Show (Flat x) => Flat (Flat x) (Stk m)   -- ^ might pop
   |
     -- | #
-    OpenVariant Pos Pos Stk   -- ^ won't pop
+    OpenVariant Pos Pos (Stk m)   -- ^ won't pop
   |
     -- | [ a b c
-    OpenSequence Pos [ST.SequencePart Pos [] NonEmpty] Stk   -- ^ won't pop
+    OpenSequence Pos (Matters m) (Stk m)   -- ^ won't pop
   |
     -- | [ a b c {=
-    SequenceOpenMetaEQ Pos [ST.SequencePart Pos [] NonEmpty] Pos (Maybe M) Stk   -- ^ @Just@ pops
+    SequenceOpenMetaEQ Pos (Matters m) Pos (Maybe m) (Stk m)   -- ^ @Just@ pops
   |
     -- | {> and {> a
-    OpenMetaGT Pos (Maybe M) Stk   -- ^ @Just@ pops
+    OpenMetaGT Pos (Maybe m) (Stk m)   -- ^ @Just@ pops
   |
     -- | {> a >}
-    MetaGT_ Pos M Pos Stk   -- ^ pops
+    MetaGT_ Pos m Pos (Stk m)   -- ^ pops
   |
     -- | ( and ( a
-    OpenParen Pos (Maybe M) Stk   -- ^ @Just@ pops
+    OpenParen Pos (Maybe m) (Stk m)   -- ^ @Just@ pops
   |
     -- | (^ and (^ a
-    OpenPin Pos (Maybe M) Stk   -- ^ @Just@ pops
+    OpenPin Pos (Maybe m) (Stk m)   -- ^ @Just@ pops
   |
     -- | (^ a ) and (^ a ^)
-    Pin Pos M Pos ST.Pin Stk   -- ^ won't pop because must be followed by {<
+    Pin Pos m Pos ST.Pin (Stk m)   -- ^ won't pop because must be followed by {<
   |
     -- | (^ a ) {< and (^ a ) {< b
-    PinOpenMetaLT Pos M Pos ST.Pin Pos (Maybe M) Stk   -- ^ @Just@ pops
+    PinOpenMetaLT Pos m Pos ST.Pin Pos (Maybe m) (Stk m)   -- ^ @Just@ pops
 
-snoc :: Pos -> Pos -> Stk -> Token -> Maybe Stk
+class MatterParse m where
+    data Matters m :: Type
+
+    flat :: ST.Flat Pos NonEmpty -> m
+
+    variant :: Pos -> Pos -> m -> m
+
+    emptyMatters :: Matters m
+    item :: Matters m -> m -> Matters m
+    metaEQ :: Matters m -> Pos -> m -> Pos -> Matters m
+    fromMatters :: Pos -> Matters m -> Pos -> m
+
+    metaGT :: Pos -> m -> Pos -> m -> m
+    paren :: Pos -> m -> Pos -> ST.Pin -> m
+    pinMetaLT :: Pos -> m -> Pos -> ST.Pin -> Pos -> m -> Pos -> m
+
+instance MatterParse (ST.Matter Pos [] NonEmpty) where
+    newtype Matters _ = MkMatters [ST.SequencePart Pos [] NonEmpty]
+
+    flat = ST.Flat
+
+    variant = ST.Variant
+
+    emptyMatters = MkMatters []
+    item (MkMatters acc) m = MkMatters $ ST.Item m : acc
+    metaEQ (MkMatters acc) p2 m l = MkMatters $ ST.MetaEQ p2 m l : acc
+    fromMatters p1 (MkMatters acc) p2 =
+        ST.Sequence p1 (reverse acc) p2
+
+    metaGT = ST.MetaGT
+    paren = ST.Paren
+    pinMetaLT = ST.PinMetaLT
+
+deriving instance Show (Matters (ST.Matter Pos [] NonEmpty))
+
+snoc :: MatterParse m => Pos -> Pos -> Stk m -> Token -> Maybe (Stk m)
 snoc l r = curry $ \case
 
     -- all number frames and number-continuation tokens
     (Flat (IntegerPart l1 r1) stk, OdToken OdFractionPart) ->
         Just $ Flat (FractionPart l r $ IntegerPart l1 r1) stk
     (Flat (FractionPart l2 r2 (IntegerPart l1 r1)) stk, OdToken OdExponentPart) ->
-        push stk $ ST.Flat $ ST.Number l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent l r)
+        push stk $ flat $ ST.Number l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent l r)
     (Flat (IntegerPart l1 r1) stk, OdToken OdExponentPart) ->
-        push stk $ ST.Flat $ ST.Number l1 r1 ST.NothingFraction (ST.JustExponent l r)
+        push stk $ flat $ ST.Number l1 r1 ST.NothingFraction (ST.JustExponent l r)
 
     (_stk, OdToken OdFractionPart) -> Nothing
     (_stk, OdToken OdExponentPart) -> Nothing
 
     -- OdJoiner and Escape frames
-    (Flat (OdJoiner l1 r1 flat) stk, SdToken (SdJoinerEscapedUtf8 size)) ->
-        Just $ Flat (Escape l size $ OdJoiner l1 r1 flat) stk
+    (Flat (OdJoiner l1 r1 flt) stk, SdToken (SdJoinerEscapedUtf8 size)) ->
+        Just $ Flat (Escape l size $ OdJoiner l1 r1 flt) stk
     (Flat OdJoiner{} _stk, _) -> Nothing
-    (Flat (Escape l1 size flat) stk, SdToken (SdJoinerEscapedUtf8 size')) ->
-        Just $ Flat (Escape l size' $ Escape l1 size flat) stk
-    (Flat (Escape l1 size flat) stk, OdToken (OdJoinerNotEscaped False)) ->
-        Just $ Flat (OdJoiner l r $ Escape l1 size flat) stk
-    (Flat (Escape l1 size flat) stk, SdToken (SdJoinerNotEscaped False)) ->
-        Just $ Flat (SdJoiner l r $ Escape l1 size flat) stk
+    (Flat (Escape l1 size flt) stk, SdToken (SdJoinerEscapedUtf8 size')) ->
+        Just $ Flat (Escape l size' $ Escape l1 size flt) stk
+    (Flat (Escape l1 size flt) stk, OdToken (OdJoinerNotEscaped False)) ->
+        Just $ Flat (OdJoiner l r $ Escape l1 size flt) stk
+    (Flat (Escape l1 size flt) stk, SdToken (SdJoinerNotEscaped False)) ->
+        Just $ Flat (SdJoiner l r $ Escape l1 size flt) stk
     (Flat Escape{} _stk, _) -> Nothing
 
     (_stk, SdToken SdJoinerEscapedUtf8{}) -> Nothing
@@ -162,10 +200,10 @@ snoc l r = curry $ \case
     (Flat (Suppressor p1) stk, SdToken (SdJoinerNotEscaped True)) ->
         Just $ Flat (SdJoiner l r $ Suppressor p1) stk
     (Flat Suppressor{} _stk, _tk) -> Nothing
-    (Flat (MoreSuppressor p1 flat) stk, OdToken (OdJoinerNotEscaped True)) ->
-        Just $ Flat (OdJoiner l r $ MoreSuppressor p1 flat) stk
-    (Flat (MoreSuppressor p1 flat) stk, SdToken (SdJoinerNotEscaped True)) ->
-        Just $ Flat (SdJoiner l r $ MoreSuppressor p1 flat) stk
+    (Flat (MoreSuppressor p1 flt) stk, OdToken (OdJoinerNotEscaped True)) ->
+        Just $ Flat (OdJoiner l r $ MoreSuppressor p1 flt) stk
+    (Flat (MoreSuppressor p1 flt) stk, SdToken (SdJoinerNotEscaped True)) ->
+        Just $ Flat (SdJoiner l r $ MoreSuppressor p1 flt) stk
     (Flat MoreSuppressor{} _stk, _tk) -> Nothing
 
     -- Text frames
@@ -173,32 +211,32 @@ snoc l r = curry $ \case
         Just $ Flat (OdJoiner l r $ Text q l1 r1) stk
     (Flat (Text q l1 r1) stk, SdToken (SdJoinerNotEscaped True)) ->
         Just $ Flat (SdJoiner l r $ Text q l1 r1) stk
-    (Flat (MoreText q l1 r1 flat) stk, OdToken (OdJoinerNotEscaped True)) ->
-        Just $ Flat (OdJoiner l r $ MoreText q l1 r1 flat) stk
-    (Flat (MoreText q l1 r1 flat) stk, SdToken (SdJoinerNotEscaped True)) ->
-        Just $ Flat (SdJoiner l r $ MoreText q l1 r1 flat) stk
+    (Flat (MoreText q l1 r1 flt) stk, OdToken (OdJoinerNotEscaped True)) ->
+        Just $ Flat (OdJoiner l r $ MoreText q l1 r1 flt) stk
+    (Flat (MoreText q l1 r1 flt) stk, SdToken (SdJoinerNotEscaped True)) ->
+        Just $ Flat (SdJoiner l r $ MoreText q l1 r1 flt) stk
 
     (_stk, OdToken (OdJoinerNotEscaped True)) -> Nothing
 
     -- SdJoiner frames
-    (Flat (SdJoiner l1 r1 flat) stk, SdToken SdUnderscore) ->
-        Just $ Flat (MoreSuppressor l $ SdJoiner l1 r1 flat) stk
-    (Flat (SdJoiner l1 r1 flat) stk, SdToken SdDoubleQuotedString) ->
-        Just $ Flat (MoreText ST.DoubleQuote l r $ SdJoiner l1 r1 flat) stk
-    (Flat (SdJoiner l1 r1 flat) stk, SdToken (SdMultiQuotedString delim)) ->
-        Just $ Flat (MoreText (ST.MultiQuote delim) l r $ SdJoiner l1 r1 flat) stk
+    (Flat (SdJoiner l1 r1 flt) stk, SdToken SdUnderscore) ->
+        Just $ Flat (MoreSuppressor l $ SdJoiner l1 r1 flt) stk
+    (Flat (SdJoiner l1 r1 flt) stk, SdToken SdDoubleQuotedString) ->
+        Just $ Flat (MoreText ST.DoubleQuote l r $ SdJoiner l1 r1 flt) stk
+    (Flat (SdJoiner l1 r1 flt) stk, SdToken (SdMultiQuotedString delim)) ->
+        Just $ Flat (MoreText (ST.MultiQuote delim) l r $ SdJoiner l1 r1 flt) stk
     (Flat SdJoiner{} _stk, _tk) -> Nothing
 
     -- All bytes frames
     (Flat (Bytes l1 r1) stk, SdToken (SdJoinerNotEscaped True)) ->
         if not $ emptyJoiner l r then Nothing else
         Just $ Flat (BytesJoiner l $ Bytes l1 r1) stk
-    (Flat (BytesJoiner p1 flat) stk, OdToken OdBytes) ->
-        Just $ Flat (MoreBytes l r $ BytesJoiner p1 flat) stk
+    (Flat (BytesJoiner p1 flt) stk, OdToken OdBytes) ->
+        Just $ Flat (MoreBytes l r $ BytesJoiner p1 flt) stk
     (Flat BytesJoiner{} _stk, _tk) -> Nothing
-    (Flat (MoreBytes l1 r1 flat) stk, SdToken (SdJoinerNotEscaped True)) ->
+    (Flat (MoreBytes l1 r1 flt) stk, SdToken (SdJoinerNotEscaped True)) ->
         if not $ emptyJoiner l r then Nothing else
-        Just $ Flat (BytesJoiner l $ MoreBytes l1 r1 flat) stk
+        Just $ Flat (BytesJoiner l $ MoreBytes l1 r1 flt) stk
 
     (_stk, SdToken (SdJoinerNotEscaped True)) -> Nothing
 
@@ -211,7 +249,7 @@ snoc l r = curry $ \case
 
     -- @
     (stk, OdToken OdAtom) ->
-        push stk $ ST.Flat $ ST.Atom l r
+        push stk $ flat $ ST.Atom l r
     -- 0
     (stk, OdToken OdIntegerPart) ->
         Just $ Flat (IntegerPart l r) $ simplify stk
@@ -233,11 +271,11 @@ snoc l r = curry $ \case
         Just $ OpenVariant l r $ simplify stk
     -- [ ]
     (stk, SdToken SdOpenSeq) ->
-        Just $ OpenSequence l [] $ simplify stk
+        Just $ OpenSequence l emptyMatters $ simplify stk
     (stk, SdToken SdCloseSeq) ->
         case simplify stk of
             OpenSequence p1 acc stk' ->
-                push stk' $ ST.Sequence p1 (reverse acc) l
+                push stk' $ fromMatters p1 acc l
             _ -> Nothing
     -- {= =}
     (stk, SdToken (SdOpenMeta EQ)) -> do
@@ -248,7 +286,7 @@ snoc l r = curry $ \case
     (stk, SdToken (SdCloseMeta EQ)) -> do
         case simplify stk of
             SequenceOpenMetaEQ p1 acc p2 (Just m) stk' ->
-                Just $ OpenSequence p1 (ST.MetaEQ p2 m l : acc) stk'
+                Just $ OpenSequence p1 (metaEQ acc p2 m l) stk'
             _ -> Nothing
     -- {> >}
     (stk, SdToken (SdOpenMeta GT)) ->
@@ -267,14 +305,14 @@ snoc l r = curry $ \case
     (stk, SdToken SdCloseParen) -> do
         case simplify stk of
             OpenParen p1 (Just m) stk' ->
-                push stk' $ ST.Paren p1 m l ST.NoPin
+                push stk' $ paren p1 m l ST.NoPin
             OpenPin p1 (Just m) stk'' ->
                 Just $ Pin p1 m l ST.NoPin stk''
             _ -> Nothing
     (stk, SdToken SdClosePin) -> do
         case simplify stk of
             OpenParen p1 (Just m) (MetaGT_ l1 m' r1 stk') ->
-                push stk' $ ST.MetaGT l1 (ST.Paren p1 m l ST.YesPin) r1 m'
+                push stk' $ metaGT l1 (paren p1 m l ST.YesPin) r1 m'
             OpenPin p1 (Just m) stk'@MetaGT_{} ->
                 Just $ Pin p1 m l ST.YesPin stk'
             _ -> Nothing
@@ -282,7 +320,7 @@ snoc l r = curry $ \case
     (stk, SdToken (SdCloseMeta LT)) -> do
         case simplify stk of
             PinOpenMetaLT l1 m r1 pin p2 (Just m') stk' ->
-                push stk' $ ST.PinMetaLT l1 m r1 pin p2 m' l
+                push stk' $ pinMetaLT l1 m r1 pin p2 m' l
             _ -> Nothing
 
 emptyJoiner :: Pos -> Pos -> Bool
@@ -290,24 +328,24 @@ emptyJoiner (MkPos x) (MkPos y) = x + 1 == y
 
 -----
 
-simplify :: Stk -> Stk
+simplify :: MatterParse m => Stk m -> Stk m
 simplify stk = case simplifyMaybe stk of
     Nothing -> stk
     Just stk' -> stk'
 
-simplifyMaybe :: Stk -> Maybe Stk
+simplifyMaybe :: MatterParse m => Stk m -> Maybe (Stk m)
 simplifyMaybe stk = case pop stk of
     Nothing -> Nothing
     Just (m, stk') -> push stk' m
 
 -----
 
-pop :: Stk -> Maybe (M, Stk)
+pop :: MatterParse m => Stk m -> Maybe (m, Stk m)
 pop = \case
     Empty{} -> Nothing
     Flat fstk stk -> do
-        flat <- popFlat fstk
-        Just (flat, stk)
+        flt <- popFlat fstk
+        Just (flt, stk)
     OpenVariant{} -> Nothing
     OpenSequence{} -> Nothing
     SequenceOpenMetaEQ{} -> Nothing
@@ -322,20 +360,20 @@ pop = \case
         Nothing
     PinOpenMetaLT{} -> Nothing
     
-popFlat :: Flat x -> Maybe M
+popFlat :: MatterParse m => Flat x -> Maybe m
 popFlat = \case
-    IntegerPart l r -> Just $ ST.Flat $ ST.Number l r ST.NothingFraction ST.NothingExponent
-    FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ ST.Flat $ ST.Number l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
+    IntegerPart l r -> Just $ flat $ ST.Number l r ST.NothingFraction ST.NothingExponent
+    FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ flat $ ST.Number l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
     Suppressor{} -> Nothing
-    x@Text{} -> Just $ ST.Flat $ ST.Text $ popT ST.NoMoreText x
+    x@Text{} -> Just $ flat $ ST.Text $ popT ST.NoMoreText x
     SdJoiner{} -> Nothing
     OdJoiner{} -> Nothing
     Escape{} -> Nothing
     MoreSuppressor{} -> Nothing
-    x@MoreText{} -> Just $ ST.Flat $ ST.Text $ popT ST.NoMoreText x
-    x@Bytes{} -> Just $ ST.Flat $ popBytes ST.NoMoreBytes x
+    x@MoreText{} -> Just $ flat $ ST.Text $ popT ST.NoMoreText x
+    x@Bytes{} -> Just $ flat $ popBytes ST.NoMoreBytes x
     BytesJoiner{} -> Nothing
-    x@MoreBytes{} -> Just $ ST.Flat $ popBytes ST.NoMoreBytes x
+    x@MoreBytes{} -> Just $ flat $ popBytes ST.NoMoreBytes x
 
 popT :: ST.MoreText Pos NonEmpty -> Flat T -> ST.Text Pos NonEmpty
 popT acc = \case
@@ -379,7 +417,7 @@ popBytes acc = \case
 
 -----
 
-push :: Stk -> M -> Maybe Stk
+push :: MatterParse m => Stk m -> m -> Maybe (Stk m)
 push = flip $ \m -> \case
     Empty mb ->
         case mb of
@@ -388,9 +426,9 @@ push = flip $ \m -> \case
     Flat{} ->
         Nothing
     OpenVariant l r stk ->
-        push stk $ ST.Variant l r m
+        push stk $ variant l r m
     OpenSequence p acc stk ->
-        Just $ OpenSequence p (ST.Item m : acc) stk
+        Just $ OpenSequence p (item acc m) stk
     SequenceOpenMetaEQ p1 acc p2 mb stk ->
         case mb of
             Nothing -> Just $ SequenceOpenMetaEQ p1 acc p2 (Just m) stk
@@ -400,7 +438,7 @@ push = flip $ \m -> \case
             Nothing -> Just $ OpenMetaGT p (Just m) stk
             Just{} -> Nothing
     MetaGT_ l m' r stk ->
-      push stk $ ST.MetaGT l m' r m
+      push stk $ metaGT l m' r m
     OpenParen p mb stk ->
         case mb of
             Nothing -> Just $ OpenParen p (Just m) stk
@@ -418,14 +456,14 @@ push = flip $ \m -> \case
 
 -----
 
-data SnocsResult =
-    SnocsDone Stk T.Tokenizer
+data SnocsResult m =
+    SnocsDone (Stk m) T.Tokenizer
   |
-    SnocsStuck Stk Pos Token Pos
+    SnocsStuck (Stk m) Pos Token Pos
   |
     SnocsError Pos Pos T.SnocError
 
-snocs :: T.MatterStream a => Stk -> a -> SnocsResult
+snocs :: (T.MatterStream a, MatterParse m) => Stk m -> a -> SnocsResult m
 snocs =
     \stk x -> go stk $ T.snocsTokenizer T.startTokenizer x
   where
@@ -436,7 +474,7 @@ snocs =
         T.SnocsDone k -> SnocsDone stk k
         T.SnocsError start cur e -> SnocsError start cur e
 
-eof :: Stk -> Maybe M
+eof :: MatterParse m => Stk m -> Maybe m
 eof = (. simplify) $ \case
     Empty (Just m) -> Just m
     _ -> Nothing
@@ -446,7 +484,7 @@ eof = (. simplify) $ \case
 -- Copied from -ddump-deriv in a throwaway module where I simply
 -- removed the type index from Flat.
 
-instance Show Stk where
+instance (Show (Matters m), Show m) => Show (Stk m) where
     showsPrec p (Empty x)
       = showParen
           (p >= 11)
