@@ -17,6 +17,7 @@ module Language.Matter.Tokenizer.StateMachine (
     MunchResult (..),
     Pos (..),
     UnconsResult (..),
+    defaultSlowMunch,
     posDiff,
 
     -- * Tokenizer states
@@ -233,29 +234,38 @@ tokenizerCurrent (MkTokenizer _start cur _st) = cur
 startTokenizer :: Tokenizer
 startTokenizer = MkTokenizer (MkPos 0) (MkPos 0) Start
 
-data UnconsResult a = UnconsNothing | UnconsJust !Char !a
+data UnconsResult inp = UnconsNothing | UnconsJust !Char !inp
 
 -- | Result along with how many were dropped
-data MunchResult a = MkMunchResult !Word32 !a
+data MunchResult inp = MkMunchResult !Word32 !inp
 
-class MatterStream a where
+-- | An input stream that can be segmented into Matter tokens
+class MatterStream inp where
     -- | Advance one character
-    uncons :: a -> UnconsResult a
+    uncons :: inp -> UnconsResult inp
     -- | Drop characters that satisfy 'memberSetChar'
-    munch :: SetChar -> a -> MunchResult a
+    munch :: SetChar -> inp -> MunchResult inp
+
+-- | An opt-in default for 'munch'
+--
+-- Does not call the 'munch' method. Calls once 'uncons' per
+-- character.
+defaultSlowMunch :: MatterStream inp => SetChar -> inp -> MunchResult inp
+defaultSlowMunch sc =
+    go 0
+  where
+    go !acc inp = case uncons inp of
+        UnconsNothing ->
+            MkMunchResult acc inp
+        UnconsJust c inp' ->
+            if memberSetChar c sc then go (acc + 1) inp' else
+            MkMunchResult acc inp
 
 instance (a ~ Char) => MatterStream [a] where
     uncons = \case
         [] -> UnconsNothing
         c:s -> UnconsJust c s
-    munch sc =
-        go 0
-      where
-        go !acc = \case
-            [] -> MkMunchResult acc []
-            c:s ->
-                if memberSetChar c sc then go (acc + 1) s else
-                MkMunchResult acc (c:s)
+    munch = defaultSlowMunch
 
 instance MatterStream T.Text where
     uncons = maybe UnconsNothing (uncurry UnconsJust) . T.uncons
@@ -291,7 +301,7 @@ data SnocsResult =
     SnocsDone !Tokenizer
   deriving (Eq, Show)
 
-snocsTokenizer :: MatterStream a => Tokenizer -> a -> SnocsResult
+snocsTokenizer :: MatterStream inp => Tokenizer -> inp -> SnocsResult
 snocsTokenizer =
     \(MkTokenizer (MkPos start) (MkPos cur) st) -> go start cur st
   where

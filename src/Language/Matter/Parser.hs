@@ -91,54 +91,57 @@ type M = ST.Matter Pos [] NonEmpty
 -- The Maybe M arguments are only useful so that push can
 -- succeed. Every function that simply ends with a call to 'push'
 -- would have to be more complicated without these.
-data Stk m =
+data Stk a =
     -- | @Nothing@ is initial state, @Just@ is accepting state
-    Empty (Maybe m)   -- ^ never pops, since that'd be useless
+    Empty (Maybe a)   -- ^ never pops, since that'd be useless
   |
-    forall x. Show (Flat x) => Flat (Flat x) (Stk m)   -- ^ might pop
+    forall x. Show (Flat x) => Flat (Flat x) (Stk a)   -- ^ might pop
   |
     -- | #
-    OpenVariant Pos Pos (Stk m)   -- ^ won't pop
+    OpenVariant Pos Pos (Stk a)   -- ^ won't pop
   |
     -- | [ a b c
-    OpenSequence Pos (Matters m) (Stk m)   -- ^ won't pop
+    OpenSequence Pos (Matters a) (Stk a)   -- ^ won't pop
   |
     -- | [ a b c {=
-    SequenceOpenMetaEQ Pos (Matters m) Pos (Maybe m) (Stk m)   -- ^ @Just@ pops
+    SequenceOpenMetaEQ Pos (Matters a) Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | {> and {> a
-    OpenMetaGT Pos (Maybe m) (Stk m)   -- ^ @Just@ pops
+    OpenMetaGT Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | {> a >}
-    MetaGT_ Pos m Pos (Stk m)   -- ^ pops
+    MetaGT_ Pos a Pos (Stk a)   -- ^ pops
   |
     -- | ( and ( a
-    OpenParen Pos (Maybe m) (Stk m)   -- ^ @Just@ pops
+    OpenParen Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | (^ and (^ a
-    OpenPin Pos (Maybe m) (Stk m)   -- ^ @Just@ pops
+    OpenPin Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | (^ a ) and (^ a ^)
-    Pin Pos m Pos ST.Pin (Stk m)   -- ^ won't pop because must be followed by {<
+    Pin Pos a Pos ST.Pin (Stk a)   -- ^ won't pop because must be followed by {<
   |
     -- | (^ a ) {< and (^ a ) {< b
-    PinOpenMetaLT Pos m Pos ST.Pin Pos (Maybe m) (Stk m)   -- ^ @Just@ pops
+    PinOpenMetaLT Pos a Pos ST.Pin Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
 
-class MatterParse m where
-    data Matters m :: Type
+-- | A data type the parser knows how to construct
+class MatterParse a where
+    -- | The 'ST.SequencePart's accumulated while parsing a
+    -- 'ST.Sequence'.
+    data Matters a
 
-    flat :: ST.Flat Pos NonEmpty -> m
+    flat :: ST.Flat Pos NonEmpty -> a
 
-    variant :: Pos -> Pos -> m -> m
+    variant :: Pos -> Pos -> a -> a
 
-    emptyMatters :: Matters m
-    item :: Matters m -> m -> Matters m
-    metaEQ :: Matters m -> Pos -> m -> Pos -> Matters m
-    fromMatters :: Pos -> Matters m -> Pos -> m
+    emptyMatters :: Matters a
+    item :: Matters a -> a -> Matters a
+    metaEQ :: Matters a -> Pos -> a -> Pos -> Matters a
+    fromMatters :: Pos -> Matters a -> Pos -> a
 
-    metaGT :: Pos -> m -> Pos -> m -> m
-    paren :: Pos -> m -> Pos -> ST.Pin -> m
-    pinMetaLT :: Pos -> m -> Pos -> ST.Pin -> Pos -> m -> Pos -> m
+    metaGT :: Pos -> a -> Pos -> a -> a
+    paren :: Pos -> a -> Pos -> ST.Pin -> a
+    pinMetaLT :: Pos -> a -> Pos -> ST.Pin -> Pos -> a -> Pos -> a
 
 instance MatterParse (ST.Matter Pos [] NonEmpty) where
     newtype Matters _ = MkMatters [ST.SequencePart Pos [] NonEmpty]
@@ -159,7 +162,7 @@ instance MatterParse (ST.Matter Pos [] NonEmpty) where
 
 deriving instance Show (Matters (ST.Matter Pos [] NonEmpty))
 
-snoc :: MatterParse m => Pos -> Pos -> Stk m -> Token -> Maybe (Stk m)
+snoc :: MatterParse a => Pos -> Pos -> Stk a -> Token -> Maybe (Stk a)
 snoc l r = curry $ \case
 
     -- all number frames and number-continuation tokens
@@ -328,19 +331,19 @@ emptyJoiner (MkPos x) (MkPos y) = x + 1 == y
 
 -----
 
-simplify :: MatterParse m => Stk m -> Stk m
+simplify :: MatterParse a => Stk a -> Stk a
 simplify stk = case simplifyMaybe stk of
     Nothing -> stk
     Just stk' -> stk'
 
-simplifyMaybe :: MatterParse m => Stk m -> Maybe (Stk m)
+simplifyMaybe :: MatterParse a => Stk a -> Maybe (Stk a)
 simplifyMaybe stk = case pop stk of
     Nothing -> Nothing
     Just (m, stk') -> push stk' m
 
 -----
 
-pop :: MatterParse m => Stk m -> Maybe (m, Stk m)
+pop :: MatterParse a => Stk a -> Maybe (a, Stk a)
 pop = \case
     Empty{} -> Nothing
     Flat fstk stk -> do
@@ -360,7 +363,7 @@ pop = \case
         Nothing
     PinOpenMetaLT{} -> Nothing
     
-popFlat :: MatterParse m => Flat x -> Maybe m
+popFlat :: MatterParse a => Flat x -> Maybe a
 popFlat = \case
     IntegerPart l r -> Just $ flat $ ST.Number l r ST.NothingFraction ST.NothingExponent
     FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ flat $ ST.Number l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
@@ -417,7 +420,7 @@ popBytes acc = \case
 
 -----
 
-push :: MatterParse m => Stk m -> m -> Maybe (Stk m)
+push :: MatterParse a => Stk a -> a -> Maybe (Stk a)
 push = flip $ \m -> \case
     Empty mb ->
         case mb of
@@ -456,14 +459,14 @@ push = flip $ \m -> \case
 
 -----
 
-data SnocsResult m =
-    SnocsDone (Stk m) T.Tokenizer
+data SnocsResult a =
+    SnocsDone (Stk a) T.Tokenizer
   |
-    SnocsStuck (Stk m) Pos Token Pos
+    SnocsStuck (Stk a) Pos Token Pos
   |
     SnocsError Pos Pos T.SnocError
 
-snocs :: (T.MatterStream a, MatterParse m) => Stk m -> a -> SnocsResult m
+snocs :: (T.MatterStream inp, MatterParse a) => Stk a -> inp -> SnocsResult a
 snocs =
     \stk x -> go stk $ T.snocsTokenizer T.startTokenizer x
   where
@@ -474,7 +477,7 @@ snocs =
         T.SnocsDone k -> SnocsDone stk k
         T.SnocsError start cur e -> SnocsError start cur e
 
-eof :: MatterParse m => Stk m -> Maybe m
+eof :: MatterParse a => Stk a -> Maybe a
 eof = (. simplify) $ \case
     Empty (Just m) -> Just m
     _ -> Nothing
@@ -484,7 +487,7 @@ eof = (. simplify) $ \case
 -- Copied from -ddump-deriv in a throwaway module where I simply
 -- removed the type index from Flat.
 
-instance (Show (Matters m), Show m) => Show (Stk m) where
+instance (Show (Matters a), Show a) => Show (Stk a) where
     showsPrec p (Empty x)
       = showParen
           (p >= 11)
