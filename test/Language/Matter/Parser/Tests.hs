@@ -155,9 +155,7 @@ parseWhole x =
                 Nothing -> ParseStuck (tokenizerStart k) Nothing (tokenizerCurrent k) stk
                 Just m -> ParseDone m
             EofJust tk -> case P.snoc (tokenizerStart k) (tokenizerCurrent k) stk (OdToken tk) of
-                Nothing -> case P.eof stk of
-                    Nothing -> ParseStuck (tokenizerStart k) Nothing (tokenizerCurrent k) stk
-                    Just m -> ParseDone m
+                Nothing -> ParseStuck (tokenizerStart k) (Just (OdToken tk)) (tokenizerCurrent k) stk
                 Just stk' -> case P.eof stk' of
                     Nothing -> ParseStuck (tokenizerStart k) Nothing (tokenizerCurrent k) stk'
                     Just m -> ParseDone m
