@@ -58,14 +58,8 @@ testCases = [
         [8#OdVariant,9#OdWhitespace,17#OdVariant,18#OdWhitespace,21#OdIntegerPart,23#OdFractionPart]
         Done
   , MkTestCase "[1+2+3-4]"
-        -- I don't love this tokenization, but maybe it's tolerable?
-        --
-        -- We could have the parser enforce that + and - for
-        -- OdIntegerPart must not be preceded by OdIntegerPart,
-        -- OdFractionPart, or OdExponentPart. (IE require whitespace
-        -- separators.)
-        [0#SdOpenSeq,2#OdIntegerPart,4#OdIntegerPart,6#OdIntegerPart,8#OdIntegerPart,8#SdCloseSeq]
-        Done
+        [0#SdOpenSeq]
+        (Snoc 2 SnocNoSign)
   , MkTestCase "0.0"
         [1#OdIntegerPart,3#OdFractionPart]
         Done

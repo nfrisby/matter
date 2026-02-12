@@ -60,8 +60,8 @@ testCases = [
   , failing "_"
   , passing "_ <> '0'ok'0'"
 
-  , failing "4+4+4+4"
-  , passing "[4+4+4+4]"
+  , passing "+7"
+  , passing "[4 +4 -4]"
 
   , passing "1"
   , passing "1e2"

@@ -531,6 +531,10 @@ data SdToken =
 data SnocError =
     SnocNeedStart
   |
+    -- | + and - are not allowed to immediately follow a decimal nor
+    -- hexadecimal digit
+    SnocNoSign
+  |
     SnocNeedNibble
   |
     -- | Whether we're in the integer part (of the mantissa), the
@@ -575,26 +579,26 @@ snocTokenizer (MkTokenizer start cur st) = snoc start cur st
 snoc :: Pos -> Pos -> St -> Char -> SnocResult
 snoc start cur = \case
 
-    Start -> snocStart SnocEpsilon SnocSd
+    Start -> snocStart SignsOk SnocEpsilon SnocSd
 
     -- loop
     MoreWhitespace -> \c ->
         if isWS c then SnocEpsilon MoreWhitespace else
-        jumpStart OdWhitespace c
+        jumpStart SignsOk OdWhitespace c
 
     -- loop
     ManyIdAtom -> \c ->
         if isID c then SnocEpsilon ManyIdAtom else
-        jumpStart OdAtom c
+        jumpStart SignsOk OdAtom c
         
     -- loop
     ManyIdVariant -> \c ->
         if isID c then SnocEpsilon ManyIdVariant else
-        jumpStart OdVariant c
+        jumpStart SignsOk OdVariant c
         
     LeftParenSuccessor -> \case
         '^' -> SnocSd SdOpenPin Start
-        c -> jumpStart OdOpenParen c
+        c -> jumpStart SignsOk OdOpenParen c
 
     CaretSuccessor -> \case
         ')' -> SnocSd SdClosePin Start
@@ -632,7 +636,7 @@ snoc start cur = \case
         if isD16 c then SnocEpsilon ManyBytes else
         if odd (posDiff cur start)
         then SnocError SnocNeedNibble
-        else jumpStart OdBytes c
+        else jumpStart SignsNotOk OdBytes c
 
     SomeDigits acc -> \c ->
         if isD10 c then SnocEpsilon $ ManyDigits acc else
@@ -652,7 +656,7 @@ snoc start cur = \case
             (Three1, 'E') -> SnocOd tk Exponent
             (Three2, 'e') -> SnocOd tk Exponent
             (Three2, 'E') -> SnocOd tk Exponent
-            _ -> jumpStart tk c
+            _ -> jumpStart SignsNotOk tk c
 
     Exponent -> \case
         '+' -> SnocEpsilon $ SomeDigits Three3
@@ -748,13 +752,15 @@ checkUtf8TooGreat nth c
 
   | otherwise = Just' False
 
-jumpStart :: OdToken -> Char -> SnocResult
-{-# INLINE jumpStart #-}
-jumpStart tk c = snocStart (SnocOd tk) (SnocOdSd tk) c
+data AreSignsOk = SignsNotOk | SignsOk
 
-snocStart :: (St -> SnocResult) -> (SdToken -> St -> SnocResult) -> Char -> SnocResult
+jumpStart :: AreSignsOk -> OdToken -> Char -> SnocResult
+{-# INLINE jumpStart #-}
+jumpStart flag tk c = snocStart flag (SnocOd tk) (SnocOdSd tk) c
+
+snocStart :: AreSignsOk -> (St -> SnocResult) -> (SdToken -> St -> SnocResult) -> Char -> SnocResult
 {-# INLINE snocStart #-}
-snocStart snocNothing snocJust = \case
+snocStart flag snocNothing snocJust = \case
     c | isWS c -> snocNothing MoreWhitespace
     '@' -> snocNothing ManyIdAtom
     '#' -> snocNothing ManyIdVariant
@@ -769,12 +775,16 @@ snocStart snocNothing snocJust = \case
     '>' -> snocNothing RightAngleSuccessor
     '0' -> snocNothing ZeroSuccessor
     c | isD10 c -> snocNothing $ ManyDigits Three1
-    '+' -> snocNothing $ SomeDigits Three1
-    '-' -> snocNothing $ SomeDigits Three1
+    '+' -> snocSign
+    '-' -> snocSign
     '"' -> snocNothing DoubleQuotedString
     '\'' -> snocNothing $ MultiQuotedString1 Nothing'
     '_' -> snocJust SdUnderscore Start
     _ -> SnocError SnocNeedStart
+  where
+    snocSign = case flag of
+        SignsNotOk -> SnocError SnocNoSign
+        SignsOk -> snocNothing $ SomeDigits Three1
 
 -----
 
