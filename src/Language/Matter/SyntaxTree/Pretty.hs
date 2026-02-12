@@ -43,7 +43,7 @@ pretty =
     phi = \case
         FlatF flt -> prettyFlat flt
         VariantF _l _r x -> od OdVariant <> x
-        SequenceF _l xs _r -> sd SdOpenSeq <> foldr ((<>) . prettySequencePart) (sd SdCloseSeq) xs
+        SequenceF _l xs _r -> sd SdOpenSeq <> foldr (\x acc -> prettySequencePart x <> acc) (sd SdCloseSeq) xs
         MetaGtF _l x _r y ->
             let y' = case y of
                     NoClosePin y1 -> y1
