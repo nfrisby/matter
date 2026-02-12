@@ -118,5 +118,5 @@ generatePinMetaLT =
         (l, r) <- sizeHalves $ sz - 1
         x <- QC.resize l generateMatter
         y <- QC.resize r generateMatter
-        pin <- frequency $ (4, pure NoPin) NE.:| [(1, pure YesPin)]
+        pin <- frequency $ (4, pure NoPin) NE.:| [(1, pure YesPin)]   -- TODO
         pure $ PinMetaLT MkP x MkP pin MkP y MkP

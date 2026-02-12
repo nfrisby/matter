@@ -5,13 +5,17 @@ module Language.Matter.Parser.Tests (tests) where
 import Control.Monad (foldM, unless)
 import Data.Functor ((<&>))
 import Data.List.NonEmpty (NonEmpty)
+import Data.Text.Lazy.IO qualified as TL
 import Data.Word (Word32)
 import Language.Matter.Parser qualified as P
 import Language.Matter.Tokenizer
+import Language.Matter.Tokenizer.Pretty (prettyToken, toLazyText)
 import Language.Matter.Tokenizer.Tests (printWithPositions)
 import Language.Matter.SyntaxTree qualified as ST
 import Language.Matter.SyntaxTree.Generator (generateMatter)
+import Language.Matter.SyntaxTree.Pretty (pretty)
 import System.Exit (exitFailure)
+import System.Random.Stateful (getStdGen, runStateGen_)
 import Test.QuickCheck qualified as QC
 
 tests :: IO ()
@@ -24,7 +28,13 @@ tests = do
         putStrLn $ show count ++ " failing test case" ++ if 1 == count then "" else "s" ++ "."
         exitFailure
 
-    QC.sample' (QC.sized $ \sz -> (,) sz <$> generateMatter) >>= mapM_ (\(sz, x) -> do putStrLn ""; print sz; print (x :: ST.Matter ST.P NonEmpty []))
+    let f (sz, x) = do
+            print sz
+            g <- getStdGen
+            -- TODO how to inject some unnecessary OdWhitespace tokens? Should not be adjacent to OdWhiteSpace.
+            TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: ST.Matter ST.P NonEmpty [])
+            putStrLn ""
+    QC.sample' (QC.sized $ \sz -> (,) sz <$> generateMatter) >>= mapM_ f
 
 -----
 

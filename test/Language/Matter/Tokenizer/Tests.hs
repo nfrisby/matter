@@ -174,20 +174,20 @@ testCases = [
         []
     (Snoc 0 SnocNeedStart)
   , MkTestCase "<%21>"
-        [1#OdJoinerNotEscaped True,3#SdJoinerEscapedUtf8 Four1,4#SdJoinerNotEscaped False]
+        [1#OdJoinerNotEscaped True,3#SdJoinerEscapedUtf8 Four1,4#SdJoinerNotEscaped Three3]
         Done
   , MkTestCase "<%C2A9>"
-        [1#OdJoinerNotEscaped True,5#SdJoinerEscapedUtf8 Four2,6#SdJoinerNotEscaped False]
+        [1#OdJoinerNotEscaped True,5#SdJoinerEscapedUtf8 Four2,6#SdJoinerNotEscaped Three3]
         Done
   , MkTestCase "<%E282AC>"
-        [1#OdJoinerNotEscaped True,7#SdJoinerEscapedUtf8 Four3,8#SdJoinerNotEscaped False]
+        [1#OdJoinerNotEscaped True,7#SdJoinerEscapedUtf8 Four3,8#SdJoinerNotEscaped Three3]
         Done
   , MkTestCase "<%F09F988A>"
-        [1#OdJoinerNotEscaped True,9#SdJoinerEscapedUtf8 Four4,10#SdJoinerNotEscaped False]
+        [1#OdJoinerNotEscaped True,9#SdJoinerEscapedUtf8 Four4,10#SdJoinerNotEscaped Three3]
         Done
   , MkTestCase "<%21ABOUT>"
         -- Looks wrong, but it's just a plain string ABOUT after the escape.
-        [1#OdJoinerNotEscaped True,3#SdJoinerEscapedUtf8 Four1,9#SdJoinerNotEscaped False]
+        [1#OdJoinerNotEscaped True,3#SdJoinerEscapedUtf8 Four1,9#SdJoinerNotEscaped Three3]
         Done
   , MkTestCase "<%21"
         -- Caught a bug where we were emitting a zero-length OdJoinerNotEscaped False
@@ -223,18 +223,18 @@ testCases = [
         (Snoc 4 SnocBadUtf8NibbleN)
   , MkTestCase "<\\n>"
         -- Backslash escapes are something the user might want to use as a joiner
-        [3#SdJoinerNotEscaped True]
+        [3#SdJoinerNotEscaped Three2]
         Done
   , MkTestCase "<\n>"
         -- Literal newline is allowed
-        [2#SdJoinerNotEscaped True]
+        [2#SdJoinerNotEscaped Three2]
         Done
   , MkTestCase "\n<>"
         -- Or can be avoided via joiners
-        [1#OdWhitespace,2#SdJoinerNotEscaped True]
+        [1#OdWhitespace,2#SdJoinerNotEscaped Three1]
         Done
   , MkTestCase "<,>"
-        [2#SdJoinerNotEscaped True]
+        [2#SdJoinerNotEscaped Three2]
         Done
   , MkTestCase "<dangling"
         -- parser will reject this, but the tokenizer shouldn't.

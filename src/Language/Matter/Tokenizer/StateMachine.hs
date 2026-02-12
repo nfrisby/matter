@@ -455,7 +455,7 @@ eof start cur = \case
 
     JoinerNotEscaped acc ->
         if cur == start
-        then EofNothing   -- no zer-length tokens!
+        then EofNothing   -- no zero-length tokens!
         else EofJust $ OdJoinerNotEscaped acc
 
     JoinerEscapedUtf8 acc -> EofError $ EofJoinerEscapedUtf8 (valueUtf8Size <$> acc)
@@ -513,10 +513,10 @@ data SdToken =
     -- | The delimiter
     SdMultiQuotedString !(Four' D10)
   |
-    -- | Whether this token also includes the @<@
+    -- | 1 is <>, 2 is <...> and 3 is ...>
     --
     -- Note that this token always includes the @>@.
-    SdJoinerNotEscaped !Bool
+    SdJoinerNotEscaped !Three
   |
     -- | The number of bytes in the UTF8 encoding of the code point
     --
@@ -609,7 +609,7 @@ snoc start cur = \case
     LeftAngleSuccessor -> \case
         '}' -> SnocSd (SdCloseMeta LT) Start
         '%' -> SnocOd (OdJoinerNotEscaped True) $ JoinerEscapedUtf8 Nothing'
-        '>' -> SnocSd (SdJoinerNotEscaped True) Start
+        '>' -> SnocSd (SdJoinerNotEscaped Three1) Start
         _ -> SnocEpsilon (JoinerNotEscaped True)
 
     EqualsSuccessor -> \case
@@ -695,7 +695,7 @@ snoc start cur = \case
     -- loop
     JoinerNotEscaped acc -> \case
         '%' -> SnocOd (OdJoinerNotEscaped acc) (JoinerEscapedUtf8 Nothing')
-        '>' -> SnocSd (SdJoinerNotEscaped acc) Start
+        '>' -> SnocSd (SdJoinerNotEscaped (if acc then Three2 else Three3)) Start
         _ -> SnocEpsilon (JoinerNotEscaped acc)
 
     JoinerEscapedUtf8 acc -> (. parseD16) $ \case

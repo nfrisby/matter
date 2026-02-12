@@ -26,7 +26,7 @@ data Matter pos neseq seq =
   |
     PinMetaLT !pos (Matter pos neseq seq) !pos !Pin !pos (Matter pos neseq seq) !pos
 
-data Pin' pos a = NoPin' a | YesPin' !pos a !pos
+data Pin' pos a = NoPin' a | YesPin' !pos a !pos   -- TODO I also need a PinMetaLT case here :/
 
 data Pin = NoPin | YesPin
 

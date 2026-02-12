@@ -31,7 +31,7 @@ import Data.Kind (Type)
 import GHC.Show (showSpace)
 import Language.Matter.Tokenizer (OdToken (..), Pos (..), SdToken (..), Token (..))
 import Language.Matter.Tokenizer qualified as T
-import Language.Matter.Tokenizer.Counting (Four)
+import Language.Matter.Tokenizer.Counting (Three (..), Four)
 import Language.Matter.SyntaxTree qualified as ST
 
 data FLAT =
@@ -183,13 +183,13 @@ snoc l r = curry $ \case
         Just $ Flat (Escape l size' $ Escape l1 size flt) stk
     (Flat (Escape l1 size flt) stk, OdToken (OdJoinerNotEscaped False)) ->
         Just $ Flat (OdJoiner l r $ Escape l1 size flt) stk
-    (Flat (Escape l1 size flt) stk, SdToken (SdJoinerNotEscaped False)) ->
+    (Flat (Escape l1 size flt) stk, SdToken (SdJoinerNotEscaped Three3)) ->
         Just $ Flat (SdJoiner l r $ Escape l1 size flt) stk
     (Flat Escape{} _stk, _) -> Nothing
 
     (_stk, SdToken SdJoinerEscapedUtf8{}) -> Nothing
     (_stk, OdToken (OdJoinerNotEscaped False)) -> Nothing
-    (_stk, SdToken (SdJoinerNotEscaped False)) -> Nothing
+    (_stk, SdToken (SdJoinerNotEscaped Three3)) -> Nothing
 
 
     -- Whitespace tokens, this MUST come after numbers and incomplete
@@ -199,23 +199,23 @@ snoc l r = curry $ \case
     -- Suppressor frames
     (Flat (Suppressor p1) stk, OdToken (OdJoinerNotEscaped True)) ->
         Just $ Flat (OdJoiner l r $ Suppressor p1) stk
-    (Flat (Suppressor p1) stk, SdToken (SdJoinerNotEscaped True)) ->
+    (Flat (Suppressor p1) stk, SdToken (SdJoinerNotEscaped _)) ->
         Just $ Flat (SdJoiner l r $ Suppressor p1) stk
     (Flat Suppressor{} _stk, _tk) -> Nothing
     (Flat (MoreSuppressor p1 flt) stk, OdToken (OdJoinerNotEscaped True)) ->
         Just $ Flat (OdJoiner l r $ MoreSuppressor p1 flt) stk
-    (Flat (MoreSuppressor p1 flt) stk, SdToken (SdJoinerNotEscaped True)) ->
+    (Flat (MoreSuppressor p1 flt) stk, SdToken (SdJoinerNotEscaped _)) ->
         Just $ Flat (SdJoiner l r $ MoreSuppressor p1 flt) stk
     (Flat MoreSuppressor{} _stk, _tk) -> Nothing
 
     -- Text frames
     (Flat (Text q l1 r1) stk, OdToken (OdJoinerNotEscaped True)) ->
         Just $ Flat (OdJoiner l r $ Text q l1 r1) stk
-    (Flat (Text q l1 r1) stk, SdToken (SdJoinerNotEscaped True)) ->
+    (Flat (Text q l1 r1) stk, SdToken (SdJoinerNotEscaped _)) ->
         Just $ Flat (SdJoiner l r $ Text q l1 r1) stk
     (Flat (MoreText q l1 r1 flt) stk, OdToken (OdJoinerNotEscaped True)) ->
         Just $ Flat (OdJoiner l r $ MoreText q l1 r1 flt) stk
-    (Flat (MoreText q l1 r1 flt) stk, SdToken (SdJoinerNotEscaped True)) ->
+    (Flat (MoreText q l1 r1 flt) stk, SdToken (SdJoinerNotEscaped _)) ->
         Just $ Flat (SdJoiner l r $ MoreText q l1 r1 flt) stk
 
     (_stk, OdToken (OdJoinerNotEscaped True)) -> Nothing
@@ -230,17 +230,18 @@ snoc l r = curry $ \case
     (Flat SdJoiner{} _stk, _tk) -> Nothing
 
     -- All bytes frames
-    (Flat (Bytes l1 r1) stk, SdToken (SdJoinerNotEscaped True)) ->
+    (Flat (Bytes l1 r1) stk, SdToken (SdJoinerNotEscaped _)) ->
         if not $ emptyJoiner l r then Nothing else
         Just $ Flat (BytesJoiner l $ Bytes l1 r1) stk
     (Flat (BytesJoiner p1 flt) stk, OdToken OdBytes) ->
         Just $ Flat (MoreBytes l r $ BytesJoiner p1 flt) stk
     (Flat BytesJoiner{} _stk, _tk) -> Nothing
-    (Flat (MoreBytes l1 r1 flt) stk, SdToken (SdJoinerNotEscaped True)) ->
+    (Flat (MoreBytes l1 r1 flt) stk, SdToken (SdJoinerNotEscaped _)) ->
         if not $ emptyJoiner l r then Nothing else
         Just $ Flat (BytesJoiner l $ MoreBytes l1 r1 flt) stk
 
-    (_stk, SdToken (SdJoinerNotEscaped True)) -> Nothing
+    (_stk, SdToken (SdJoinerNotEscaped Three1)) -> Nothing
+    (_stk, SdToken (SdJoinerNotEscaped Three2)) -> Nothing
 
     -- Pin frames
     (Pin l1 e r1 pin stk, SdToken (SdOpenMeta LT)) ->
