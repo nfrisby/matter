@@ -107,8 +107,13 @@ generateMetaGT =
         (l, r) <- sizeHalves $ sz - 1
         x <- QC.resize l generateMatter
         y <- frequency $
-            (  (10  ,      NoPin'             <$> QC.resize  r      generateMatter)            NE.:|)
-          $ ([ ( 1, (\y -> YesPin' MkP y MkP) <$> QC.resize (r - 1) generateMatter) | r <= 2 ] ++)
+            (  (10  ,      NoClosePin              <$> QC.resize  r      generateMatter)            NE.:|)
+          $ ([ ( 1, (\y -> OnlyClosePin MkP y MkP) <$> QC.resize (r - 1) generateMatter) | r <= 2 ] ++)
+          $ ([ ( 1, do
+                   (rl, rr) <- sizeHalves $ r - 1
+                   yx <- QC.resize rl generateMatter
+                   yy <- QC.resize rr generateMatter
+                   pure $ BothPins MkP yx MkP MkP yy MkP                               ) | r <= 3 ] ++)
           $ []
         pure $ MetaGT MkP x MkP y
 
@@ -118,5 +123,4 @@ generatePinMetaLT =
         (l, r) <- sizeHalves $ sz - 1
         x <- QC.resize l generateMatter
         y <- QC.resize r generateMatter
-        pin <- frequency $ (4, pure NoPin) NE.:| [(1, pure YesPin)]   -- TODO
-        pure $ PinMetaLT MkP x MkP pin MkP y MkP
+        pure $ PinMetaLT MkP x MkP MkP y MkP

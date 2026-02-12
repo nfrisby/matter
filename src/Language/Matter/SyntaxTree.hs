@@ -20,15 +20,18 @@ data Matter pos neseq seq =
   |
     Sequence !pos (seq (SequencePart pos (Matter pos neseq seq))) !pos
   |
-    MetaGT !pos (Matter pos neseq seq) !pos !(Pin' pos ((Matter pos neseq seq)))
+    MetaGT !pos (Matter pos neseq seq) !pos !(ClosePin pos (Matter pos neseq seq))
   |
     Paren !pos (Matter pos neseq seq) !pos
   |
-    PinMetaLT !pos (Matter pos neseq seq) !pos !Pin !pos (Matter pos neseq seq) !pos
+    PinMetaLT !pos (Matter pos neseq seq) !pos !pos (Matter pos neseq seq) !pos
 
-data Pin' pos a = NoPin' a | YesPin' !pos a !pos   -- TODO I also need a PinMetaLT case here :/
-
-data Pin = NoPin | YesPin
+data ClosePin pos a =
+    NoClosePin a
+  |
+    OnlyClosePin !pos a !pos
+  |
+    BothPins !pos a !pos !pos a !pos
 
 -----
 
@@ -78,8 +81,7 @@ data SequencePart pos a =
 
 deriving instance Show P
 deriving instance (Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos (Matter pos neseq seq)))) => Show (Matter pos neseq seq)
-deriving instance Show Pin
-deriving instance (Show pos, Show a) => Show (Pin' pos a)
+deriving instance (Show pos, Show a) => Show (ClosePin pos a)
 deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Flat pos neseq)
 deriving instance Show pos => Show (MaybeFraction pos)
 deriving instance Show pos => Show (MaybeExponent pos)
@@ -91,7 +93,7 @@ deriving instance Show pos => Show (Escape pos)
 deriving instance Show pos => Show (MoreBytes pos)
 deriving instance (Show pos, Show a) => Show (SequencePart pos a)
 
-deriving instance Functor (Pin' pos)
+deriving instance Functor (ClosePin pos)
 deriving instance Functor (SequencePart pos)
 
 -----
@@ -104,11 +106,11 @@ data MatterF pos neseq seq a =
   |
     SequenceF !pos (seq (SequencePart pos a)) !pos
   |
-    MetaGtF !pos a !pos !(Pin' pos a)
+    MetaGtF !pos a !pos !(ClosePin pos a)
   |
     ParenF !pos a !pos
   |
-    PinMetaLtF !pos a !pos !Pin !pos a !pos
+    PinMetaLtF !pos a !pos !pos a !pos
 
 deriving instance Functor seq => Functor (MatterF pos neseq seq)
 
@@ -121,7 +123,7 @@ project = \case
     Sequence l xs r -> SequenceF l xs r
     MetaGT l x r y -> MetaGtF l x r y
     Paren l x r -> ParenF l x r
-    PinMetaLT l1 x r1 pin l2 y r2 -> PinMetaLtF l1 x r1 pin l2 y r2
+    PinMetaLT l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
 
 -- | Inverse of 'project'
 embed :: MatterF pos neseq seq (Matter pos neseq seq) -> Matter pos neseq seq
@@ -132,7 +134,7 @@ embed = \case
     SequenceF l xs r -> Sequence l xs r
     MetaGtF l x r y -> MetaGT l x r y
     ParenF l x r -> Paren l x r
-    PinMetaLtF l1 x r1 pin l2 y r2 -> PinMetaLT l1 x r1 pin l2 y r2
+    PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLT l1 x r1 l2 y r2
 
 type instance F.Base (Matter pos neseq seq) = MatterF pos neseq seq
 instance Functor seq => F.Recursive (Matter pos neseq seq) where project = project
@@ -155,4 +157,4 @@ mapSequence f = \case
     SequenceF l xs r -> SequenceF l (f xs) r
     MetaGtF l x r y -> MetaGtF l x r y
     ParenF l x r -> ParenF l x r
-    PinMetaLtF l1 x r1 pin l2 y r2 -> PinMetaLtF l1 x r1 pin l2 y r2
+    PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2

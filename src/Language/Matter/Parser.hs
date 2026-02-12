@@ -116,7 +116,7 @@ data Stk a =
     OpenSequence Pos (MatterSeq a (ST.SequencePart Pos a)) (Stk a)   -- ^ won't pop
   |
     -- | [ a b c {=
-    SequenceOpenMetaEQ Pos (MatterSeq a (ST.SequencePart Pos a)) Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    Sequence_OpenMetaEQ Pos (MatterSeq a (ST.SequencePart Pos a)) Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | {> and {> a
     OpenMetaGT Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
@@ -130,11 +130,17 @@ data Stk a =
     -- | (^ and (^ a
     OpenPin Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
-    -- | (^ a ) and (^ a ^)
-    Pin Pos a Pos ST.Pin (Stk a)   -- ^ won't pop because must be followed by {<
+    -- | (^ a )
+    PinParen Pos a Pos (Stk a)   -- ^ won't pop because must be followed by {<
+  |
+    -- | {> a >} (^ b ^)
+    MetaGT_PinPin Pos a Pos Pos a Pos (Stk a)   -- ^ won't pop because must be followed by {<
   |
     -- | (^ a ) {< and (^ a ) {< b
-    PinOpenMetaLT Pos a Pos ST.Pin Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    PinParen_OpenMetaLT Pos a Pos Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+  |
+    -- | {> a >} (^ b ^) {< and {> a >} (^ b ^) {< c
+    MetaGT_PinPin_OpenMetaLT Pos a Pos Pos a Pos Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
 
 -- | A data type the parser knows how to construct
 class MatterParse a where
@@ -243,10 +249,13 @@ snoc l r = curry $ \case
     (_stk, SdToken (SdJoinerNotEscaped Three1)) -> Nothing
     (_stk, SdToken (SdJoinerNotEscaped Three2)) -> Nothing
 
-    -- Pin frames
-    (Pin l1 e r1 pin stk, SdToken (SdOpenMeta LT)) ->
-        Just $ PinOpenMetaLT l1 e r1 pin l Nothing stk
-    (Pin{}, _tk) -> Nothing
+    -- PinParen and PinPin frames
+    (PinParen l1 m1 r1 stk, SdToken (SdOpenMeta LT)) ->
+        Just $ PinParen_OpenMetaLT l1 m1 r1 l Nothing stk
+    (MetaGT_PinPin l1 m1 r1 l2 m2 r2 stk, SdToken (SdOpenMeta LT)) ->
+        Just $ MetaGT_PinPin_OpenMetaLT l1 m1 r1 l2 m2 r2 l Nothing stk
+    (PinParen{}, _tk) -> Nothing
+    (MetaGT_PinPin{}, _tk) -> Nothing
 
     (_stk, SdToken (SdOpenMeta LT)) -> Nothing
 
@@ -284,11 +293,11 @@ snoc l r = curry $ \case
     (stk, SdToken (SdOpenMeta EQ)) -> do
         case simplify stk of
             OpenSequence p1 acc stk' ->
-                Just $ SequenceOpenMetaEQ p1 acc l Nothing stk'
+                Just $ Sequence_OpenMetaEQ p1 acc l Nothing stk'
             _ -> Nothing
     (stk, SdToken (SdCloseMeta EQ)) -> do
         case simplify stk of
-            SequenceOpenMetaEQ p1 acc p2 (Just m) stk' ->
+            Sequence_OpenMetaEQ p1 acc p2 (Just m) stk' ->
                 Just $ OpenSequence p1 (snocMatterSeq acc $ ST.MetaEQ p2 m l) stk'
             _ -> Nothing
     -- {> >}
@@ -310,20 +319,22 @@ snoc l r = curry $ \case
             OpenParen p1 (Just m) stk' ->
                 push stk' $ parseAlgebra $ ST.ParenF p1 m l
             OpenPin p1 (Just m) stk'' ->
-                Just $ Pin p1 m l ST.NoPin stk''
+                Just $ PinParen p1 m l stk''
             _ -> Nothing
     (stk, SdToken SdClosePin) -> do
         case simplify stk of
-            OpenParen p1 (Just m) (MetaGT_ l1 m' r1 stk') ->
-                push stk' $ parseAlgebra $ ST.MetaGtF l1 m' r1 (ST.YesPin' p1 m l)
-            OpenPin p1 (Just m) stk'@MetaGT_{} ->
-                Just $ Pin p1 m l ST.YesPin stk'
+            OpenParen p (Just m) (MetaGT_ l1 m' r1 stk') ->
+                push stk' $ parseAlgebra $ ST.MetaGtF l1 m' r1 (ST.OnlyClosePin p m l)
+            OpenPin p1 (Just m) (MetaGT_ l1 m' r1 stk') ->
+                Just $ MetaGT_PinPin l1 m' r1 p1 m l stk'
             _ -> Nothing
     -- <}    note that {< is handled by the Pin frame above
     (stk, SdToken (SdCloseMeta LT)) -> do
         case simplify stk of
-            PinOpenMetaLT l1 m r1 pin p2 (Just m') stk' ->
-                push stk' $ parseAlgebra $ ST.PinMetaLtF l1 m r1 pin p2 m' l
+            PinParen_OpenMetaLT l1 m1 r1 p2 (Just m2) stk' ->
+                push stk' $ parseAlgebra $ ST.PinMetaLtF l1 m1 r1 p2 m2 l
+            MetaGT_PinPin_OpenMetaLT l1 m1 r1 l2 m2 r2 p3 (Just m3) stk' ->
+                push stk' $ parseAlgebra $ ST.MetaGtF l1 m1 r1 (ST.BothPins l2 m2 r2 p3 m3 l)
             _ -> Nothing
 
 emptyJoiner :: Pos -> Pos -> Bool
@@ -351,17 +362,23 @@ pop = \case
         Just (flt, stk)
     OpenVariant{} -> Nothing
     OpenSequence{} -> Nothing
-    SequenceOpenMetaEQ{} -> Nothing
+    Sequence_OpenMetaEQ{} -> Nothing
     OpenMetaGT{} -> Nothing
     MetaGT_{} -> Nothing
     OpenParen{} -> Nothing
     OpenPin{} -> Nothing
-    Pin{} ->
-        -- Note that this should not be simplifyMaybe to ST.Paren! (^ ... )
-        -- /must/ be /direclty/ followed by {<, and the logic for {<
-        -- above doesn't call 'pop' or 'simplifyMaybe'.
+    PinParen{} ->
+        -- Note that this should not be simplifyMaybe to ST.Paren! (^
+        -- ... ) It /must/ be /direclty/ followed by {<, and the logic
+        -- for {< above doesn't call 'pop' or 'simplifyMaybe'.
         Nothing
-    PinOpenMetaLT{} -> Nothing
+    MetaGT_PinPin{} ->
+        -- Note that this should not be simplifyMaybe to ST.Paren! (^
+        -- ... ^) It /must/ be /direclty/ followed by {<, and the
+        -- logic for {< above doesn't call 'pop' or 'simplifyMaybe'.
+        Nothing
+    PinParen_OpenMetaLT{} -> Nothing
+    MetaGT_PinPin_OpenMetaLT{} -> Nothing
     
 popFlat :: MatterParse a => Flat x -> Maybe a
 popFlat = \case
@@ -432,16 +449,16 @@ push = flip $ \m -> \case
         push stk $ parseAlgebra $ ST.VariantF l r m
     OpenSequence p acc stk ->
         Just $ OpenSequence p (snocMatterSeq acc $ ST.Item m) stk
-    SequenceOpenMetaEQ p1 acc p2 mb stk ->
+    Sequence_OpenMetaEQ p1 acc p2 mb stk ->
         case mb of
-            Nothing -> Just $ SequenceOpenMetaEQ p1 acc p2 (Just m) stk
+            Nothing -> Just $ Sequence_OpenMetaEQ p1 acc p2 (Just m) stk
             Just{} -> Nothing
     OpenMetaGT p mb stk ->
         case mb of
             Nothing -> Just $ OpenMetaGT p (Just m) stk
             Just{} -> Nothing
     MetaGT_ l m' r stk ->
-      push stk $ parseAlgebra $ ST.MetaGtF l m' r (ST.NoPin' m)
+      push stk $ parseAlgebra $ ST.MetaGtF l m' r (ST.NoClosePin m)
     OpenParen p mb stk ->
         case mb of
             Nothing -> Just $ OpenParen p (Just m) stk
@@ -450,11 +467,17 @@ push = flip $ \m -> \case
         case mb of
             Nothing -> Just $ OpenPin p (Just m) stk
             Just{} -> Nothing
-    Pin{} ->
+    PinParen{} ->
         Nothing
-    PinOpenMetaLT l1 m' r1 pin l2 mb stk ->
+    MetaGT_PinPin{} ->
+        Nothing
+    PinParen_OpenMetaLT l1 m' r1 l2 mb stk ->
         case mb of
-            Nothing -> Just $ PinOpenMetaLT l1 m' r1 pin l2 (Just m) stk
+            Nothing -> Just $ PinParen_OpenMetaLT l1 m' r1 l2 (Just m) stk
+            Just{} -> Nothing
+    MetaGT_PinPin_OpenMetaLT l1 m1 r1 l2 m2 r2 l3 mb stk ->
+        case mb of
+            Nothing -> Just $ MetaGT_PinPin_OpenMetaLT l1 m1 r1 l2 m2 r2 l3 (Just m) stk
             Just{} -> Nothing
 
 -----
@@ -488,209 +511,271 @@ eof = (. simplify) $ \case
 -- removed the type index from Flat.
 
 instance (Show (MatterSeq a (ST.SequencePart Pos a)), Show a) => Show (Stk a) where
-    showsPrec p (Empty x)
+    showsPrec a_aIc (Empty b1_aId)
       = showParen
-          (p >= 11)
+          (a_aIc >= 11)
           ((.)
              (showString "Empty ")
-             (showsPrec 11 x))
-    showsPrec
-      a_a2kw
-      (Flat b1_a2kx b2_a2ky)
+             (showsPrec 11 b1_aId))
+    showsPrec a_aV9 (Flat b1_aVa b2_aVb)
       = showParen
-          (a_a2kw >= 11)
+          (a_aV9 >= 11)
           ((.)
              (showString "Flat ")
              ((.)
-                (showsPrec 11 b1_a2kx)
+                (showsPrec 11 b1_aVa)
                 ((.)
                    showSpace
-                   (showsPrec 11 b2_a2ky))))
+                   (showsPrec 11 b2_aVb))))
     showsPrec
-      a_a2kE
-      (OpenVariant b1_a2kF b2_a2kG b3_a2kH)
+      a_aVc
+      (OpenVariant b1_aVd b2_aVe b3_aVf)
       = showParen
-          (a_a2kE >= 11)
+          (a_aVc >= 11)
           ((.)
              (showString "OpenVariant ")
              ((.)
-                (showsPrec 11 b1_a2kF)
+                (showsPrec 11 b1_aVd)
                 ((.)
                    showSpace
                    ((.)
-                      (showsPrec 11 b2_a2kG)
+                      (showsPrec 11 b2_aVe)
                       ((.)
                          showSpace
-                         (showsPrec 11 b3_a2kH))))))
+                         (showsPrec 11 b3_aVf))))))
     showsPrec
-      a_a2kI
-      (OpenSequence b1_a2kJ b2_a2kK b3_a2kL)
+      a_aVg
+      (OpenSequence b1_aVh b2_aVi b3_aVj)
       = showParen
-          (a_a2kI >= 11)
+          (a_aVg >= 11)
           ((.)
              (showString "OpenSequence ")
              ((.)
-                (showsPrec 11 b1_a2kJ)
+                (showsPrec 11 b1_aVh)
                 ((.)
                    showSpace
                    ((.)
-                      (showsPrec 11 b2_a2kK)
+                      (showsPrec 11 b2_aVi)
                       ((.)
                          showSpace
-                         (showsPrec 11 b3_a2kL))))))
+                         (showsPrec 11 b3_aVj))))))
     showsPrec
-      a_a2kM
-      (SequenceOpenMetaEQ b1_a2kN b2_a2kO
-                                                    b3_a2kP b4_a2kQ b5_a2kR)
+      a_aVk
+      (Sequence_OpenMetaEQ b1_aVl b2_aVm b3_aVn b4_aVo b5_aVp)
       = showParen
-          (a_a2kM >= 11)
+          (a_aVk >= 11)
           ((.)
-             (showString "SequenceOpenMetaEQ ")
+             (showString "Sequence_OpenMetaEQ ")
              ((.)
-                (showsPrec 11 b1_a2kN)
+                (showsPrec 11 b1_aVl)
                 ((.)
                    showSpace
                    ((.)
-                      (showsPrec 11 b2_a2kO)
+                      (showsPrec 11 b2_aVm)
                       ((.)
                          showSpace
                          ((.)
-                            (showsPrec 11 b3_a2kP)
+                            (showsPrec 11 b3_aVn)
                             ((.)
                                showSpace
                                ((.)
-                                  (showsPrec 11 b4_a2kQ)
+                                  (showsPrec 11 b4_aVo)
                                   ((.)
                                      showSpace
-                                     (showsPrec 11 b5_a2kR))))))))))
+                                     (showsPrec 11 b5_aVp))))))))))
     showsPrec
-      a_a2kS
-      (OpenMetaGT b1_a2kT b2_a2kU b3_a2kV)
+      a_aVq
+      (OpenMetaGT b1_aVr b2_aVs b3_aVt)
       = showParen
-          (a_a2kS >= 11)
+          (a_aVq >= 11)
           ((.)
              (showString "OpenMetaGT ")
              ((.)
-                (showsPrec 11 b1_a2kT)
+                (showsPrec 11 b1_aVr)
                 ((.)
                    showSpace
                    ((.)
-                      (showsPrec 11 b2_a2kU)
+                      (showsPrec 11 b2_aVs)
                       ((.)
                          showSpace
-                         (showsPrec 11 b3_a2kV))))))
+                         (showsPrec 11 b3_aVt))))))
     showsPrec
-      a_a2kW
-      (MetaGT_ b1_a2kX b2_a2kY b3_a2kZ b4_a2l0)
+      a_aVu
+      (MetaGT_ b1_aVv b2_aVw b3_aVx b4_aVy)
       = showParen
-          (a_a2kW >= 11)
+          (a_aVu >= 11)
           ((.)
              (showString "MetaGT_ ")
              ((.)
-                (showsPrec 11 b1_a2kX)
+                (showsPrec 11 b1_aVv)
                 ((.)
                    showSpace
                    ((.)
-                      (showsPrec 11 b2_a2kY)
+                      (showsPrec 11 b2_aVw)
                       ((.)
                          showSpace
                          ((.)
-                            (showsPrec 11 b3_a2kZ)
+                            (showsPrec 11 b3_aVx)
                             ((.)
                                showSpace
-                               (showsPrec 11 b4_a2l0))))))))
+                               (showsPrec 11 b4_aVy))))))))
     showsPrec
-      a_a2l1
-      (OpenParen b1_a2l2 b2_a2l3 b3_a2l4)
+      a_aVz
+      (OpenParen b1_aVA b2_aVB b3_aVC)
       = showParen
-          (a_a2l1 >= 11)
+          (a_aVz >= 11)
           ((.)
              (showString "OpenParen ")
              ((.)
-                (showsPrec 11 b1_a2l2)
+                (showsPrec 11 b1_aVA)
                 ((.)
                    showSpace
                    ((.)
-                      (showsPrec 11 b2_a2l3)
+                      (showsPrec 11 b2_aVB)
                       ((.)
                          showSpace
-                         (showsPrec 11 b3_a2l4))))))
+                         (showsPrec 11 b3_aVC))))))
     showsPrec
-      a_a2l5
-      (OpenPin b1_a2l6 b2_a2l7 b3_a2l8)
+      a_aVD
+      (OpenPin b1_aVE b2_aVF b3_aVG)
       = showParen
-          (a_a2l5 >= 11)
+          (a_aVD >= 11)
           ((.)
              (showString "OpenPin ")
              ((.)
-                (showsPrec 11 b1_a2l6)
+                (showsPrec 11 b1_aVE)
                 ((.)
                    showSpace
                    ((.)
-                      (showsPrec 11 b2_a2l7)
+                      (showsPrec 11 b2_aVF)
                       ((.)
                          showSpace
-                         (showsPrec 11 b3_a2l8))))))
+                         (showsPrec 11 b3_aVG))))))
     showsPrec
-      a_a2l9
-      (Pin b1_a2la b2_a2lb b3_a2lc b4_a2ld
-                                     b5_a2le)
+      a_aVH
+      (PinParen b1_aVI b2_aVJ b3_aVK b4_aVL)
       = showParen
-          (a_a2l9 >= 11)
+          (a_aVH >= 11)
           ((.)
-             (showString "Pin ")
+             (showString "PinParen ")
              ((.)
-                (showsPrec 11 b1_a2la)
+                (showsPrec 11 b1_aVI)
                 ((.)
                    showSpace
                    ((.)
-                      (showsPrec 11 b2_a2lb)
+                      (showsPrec 11 b2_aVJ)
                       ((.)
                          showSpace
                          ((.)
-                            (showsPrec 11 b3_a2lc)
+                            (showsPrec 11 b3_aVK)
                             ((.)
                                showSpace
-                               ((.)
-                                  (showsPrec 11 b4_a2ld)
-                                  ((.)
-                                     showSpace
-                                     (showsPrec 11 b5_a2le))))))))))
+                               (showsPrec 11 b4_aVL))))))))
     showsPrec
-      a_a2lf
-      (PinOpenMetaLT b1_a2lg b2_a2lh b3_a2li
-                                               b4_a2lj b5_a2lk b6_a2ll b7_a2lm)
+      a_aVM
+      (MetaGT_PinPin b1_aVN b2_aVO b3_aVP b4_aVQ b5_aVR b6_aVS
+                         b7_aVT)
       = showParen
-          (a_a2lf >= 11)
+          (a_aVM >= 11)
           ((.)
-             (showString "PinOpenMetaLT ")
+             (showString "MetaGT_PinPin ")
              ((.)
-                (showsPrec 11 b1_a2lg)
+                (showsPrec 11 b1_aVN)
                 ((.)
                    showSpace
                    ((.)
-                      (showsPrec 11 b2_a2lh)
+                      (showsPrec 11 b2_aVO)
                       ((.)
                          showSpace
                          ((.)
-                            (showsPrec 11 b3_a2li)
+                            (showsPrec 11 b3_aVP)
                             ((.)
                                showSpace
                                ((.)
-                                  (showsPrec 11 b4_a2lj)
+                                  (showsPrec 11 b4_aVQ)
                                   ((.)
                                      showSpace
                                      ((.)
-                                        (showsPrec 11 b5_a2lk)
+                                        (showsPrec 11 b5_aVR)
                                         ((.)
                                            showSpace
                                            ((.)
-                                              (showsPrec 11 b6_a2ll)
+                                              (showsPrec 11 b6_aVS)
                                               ((.)
                                                  showSpace
                                                  (showsPrec
-                                                    11 b7_a2lm))))))))))))))
-  
+                                                    11 b7_aVT))))))))))))))
+    showsPrec
+      a_aVU
+      (PinParen_OpenMetaLT b1_aVV b2_aVW b3_aVX b4_aVY b5_aVZ b6_aW0)
+      = showParen
+          (a_aVU >= 11)
+          ((.)
+             (showString "PinParen_OpenMetaLT ")
+             ((.)
+                (showsPrec 11 b1_aVV)
+                ((.)
+                   showSpace
+                   ((.)
+                      (showsPrec 11 b2_aVW)
+                      ((.)
+                         showSpace
+                         ((.)
+                            (showsPrec 11 b3_aVX)
+                            ((.)
+                               showSpace
+                               ((.)
+                                  (showsPrec 11 b4_aVY)
+                                  ((.)
+                                     showSpace
+                                     ((.)
+                                        (showsPrec 11 b5_aVZ)
+                                        ((.)
+                                           showSpace
+                                           (showsPrec 11 b6_aW0))))))))))))
+    showsPrec
+      a_aW1
+      (MetaGT_PinPin_OpenMetaLT b1_aW2 b2_aW3 b3_aW4 b4_aW5 b5_aW6
+                                    b6_aW7 b7_aW8 b8_aW9 b9_aWa)
+      = showParen
+          (a_aW1 >= 11)
+          ((.)
+             (showString "MetaGT_PinPin_OpenMetaLT ")
+             ((.)
+                (showsPrec 11 b1_aW2)
+                ((.)
+                   showSpace
+                   ((.)
+                      (showsPrec 11 b2_aW3)
+                      ((.)
+                         showSpace
+                         ((.)
+                            (showsPrec 11 b3_aW4)
+                            ((.)
+                               showSpace
+                               ((.)
+                                  (showsPrec 11 b4_aW5)
+                                  ((.)
+                                     showSpace
+                                     ((.)
+                                        (showsPrec 11 b5_aW6)
+                                        ((.)
+                                           showSpace
+                                           ((.)
+                                              (showsPrec 11 b6_aW7)
+                                              ((.)
+                                                 showSpace
+                                                 ((.)
+                                                    (showsPrec 11 b7_aW8)
+                                                    ((.)
+                                                       showSpace
+                                                       ((.)
+                                                          (showsPrec 11 b8_aW9)
+                                                          ((.)
+                                                             showSpace
+                                                             (showsPrec
+                                                                11 b9_aWa))))))))))))))))))
+
 instance Show (Flat x) where
     showsPrec
       a_a2ln

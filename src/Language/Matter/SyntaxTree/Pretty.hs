@@ -45,14 +45,15 @@ pretty =
         VariantF _l _r x -> od OdVariant <> x
         SequenceF _l xs _r -> sd SdOpenSeq <> foldr ((<>) . prettySequencePart) (sd SdCloseSeq) xs
         MetaGtF _l x _r y ->
-            let y2 = case y of
-                    NoPin' y1 -> y1
-                    YesPin' _l y1 _r -> od OdOpenParen <> y1 <> sd SdClosePin
+            let y' = case y of
+                    NoClosePin y1 -> y1
+                    OnlyClosePin _l y1 _r -> od OdOpenParen <> y1 <> sd SdClosePin
+                    BothPins _l1 y1 _r1 _l2 y2 _r2 -> sd SdOpenPin <> y1 <> sd SdClosePin <> sd (SdOpenMeta LT) <> y2 <> sd (SdCloseMeta LT)
             in
-            sd (SdOpenMeta GT) <> x <> sd (SdCloseMeta GT) <> y2
+            sd (SdOpenMeta GT) <> x <> sd (SdCloseMeta GT) <> y'
         ParenF _l x _r -> od OdOpenParen <> x <> sd SdCloseParen
-        PinMetaLtF _l1 x _r1 pin _l2 y _r2 ->
-            sd SdOpenPin <> x <> sd (case pin of NoPin -> SdCloseParen; YesPin -> SdClosePin) <> sd (SdOpenMeta LT) <> y <> sd (SdCloseMeta LT)
+        PinMetaLtF _l1 x _r1 _l2 y _r2 ->
+            sd SdOpenPin <> x <> sd SdCloseParen <> sd (SdOpenMeta LT) <> y <> sd (SdCloseMeta LT)
 
 prettySequencePart :: SequencePart pos (DNonEmpty Token) -> DNonEmpty Token
 prettySequencePart = \case
