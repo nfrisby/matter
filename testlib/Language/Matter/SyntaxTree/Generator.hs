@@ -26,10 +26,11 @@ sizeHalves sz = do
 sizeParts :: Int -> QC.Gen [Int]
 sizeParts sz = do
     g <- fmap mkSMGen $ QC.chooseUpTo maxBound
-    QC.shuffle $ Combinat.fromPartition $ fst $ Combinat.randomPartition (max 1 sz - 1) g
+    QC.shuffle $ Combinat.fromPartition $ fst $ Combinat.randomPartition (max 0 sz) g
 
 -----
 
+-- | Generates a 'Matter' that strictly respects 'QC.sized'
 generateMatter :: QC.Gen (Matter P NonEmpty [])
 generateMatter =
     QC.sized $ \sz ->
@@ -53,7 +54,7 @@ generateMatter =
 generateSequence :: QC.Gen (Matter P NonEmpty [])
 generateSequence =
     QC.sized $ \sz -> do
-        szs <- sizeParts (max 1 sz - 1)
+        szs <- sizeParts $ max 1 sz - 1
         xs <- mapM (flip QC.resize generateSequencePart) szs
         pure $ Sequence MkP xs MkP
 
@@ -104,23 +105,23 @@ generateParen =
 generateMetaGT :: QC.Gen (Matter P NonEmpty [])
 generateMetaGT =
     QC.sized $ \sz -> do
-        (l, r) <- sizeHalves $ sz - 1
+        (l, r) <- sizeHalves $ max 1 sz - 1
         x <- QC.resize l generateMatter
         y <- frequency $
             (  (10  ,      NoClosePin              <$> QC.resize  r      generateMatter)            NE.:|)
           $ ([ ( 1, (\y -> OnlyClosePin MkP y MkP) <$> QC.resize (r - 1) generateMatter) | r <= 2 ] ++)
           $ ([ ( 1, do
-                   (rl, rr) <- sizeHalves $ r - 1
+                   (rl, rr) <- sizeHalves $ r - 2
                    yx <- QC.resize rl generateMatter
                    yy <- QC.resize rr generateMatter
-                   pure $ BothPins MkP yx MkP MkP yy MkP                               ) | r <= 3 ] ++)
+                   pure $ BothPins MkP yx MkP MkP yy MkP                               ) | r <= 4 ] ++)
           $ []
         pure $ MetaGT MkP x MkP y
 
 generatePinMetaLT :: QC.Gen (Matter P NonEmpty [])
 generatePinMetaLT =
     QC.sized $ \sz -> do
-        (l, r) <- sizeHalves $ sz - 1
+        (l, r) <- sizeHalves $ max 2 sz - 2
         x <- QC.resize l generateMatter
         y <- QC.resize r generateMatter
         pure $ PinMetaLT MkP x MkP MkP y MkP
