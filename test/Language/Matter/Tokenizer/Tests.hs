@@ -237,6 +237,9 @@ testCases = [
         -- tokenization.
         [9#OdJoinerNotEscaped True]
         Done
+  , MkTestCase "[@NaN 0]"
+        [0#SdOpenSeq, 5#OdAtom, 6#OdWhitespace, 7#OdIntegerPart, 7#SdCloseSeq]
+        Done
   ]
 
 -----

@@ -629,7 +629,9 @@ snoc start cur = \case
         '.' -> SnocOd OdIntegerPart $ SomeDigits Three2
         'e' -> SnocOd OdIntegerPart Exponent
         'E' -> SnocOd OdIntegerPart Exponent
-        _ -> SnocEpsilon (ManyDigits Three1)
+        c
+          | isD10 c -> SnocEpsilon (ManyDigits Three1)
+          | otherwise -> jumpStart SignsNotOk OdIntegerPart c
 
     -- loop
     ManyBytes -> \c ->

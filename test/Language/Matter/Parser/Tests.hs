@@ -108,6 +108,9 @@ testCases = [
   , failing "(^ @ ) {< @ <} {< @ <}"
   , passing "(^(^ @ ){< @ <} ){< @ <}"
   , passing "{> @ >} {> @ >} @"
+
+  , passing "[@NaN 0]"
+
   ]
 
 data TestCase = MkTestCase String Bool
