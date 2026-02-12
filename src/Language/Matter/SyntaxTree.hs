@@ -93,6 +93,21 @@ deriving instance Show pos => Show (Escape pos)
 deriving instance Show pos => Show (MoreBytes pos)
 deriving instance (Show pos, Show a) => Show (SequencePart pos a)
 
+deriving instance Eq P
+deriving instance (Eq pos, Eq (neseq (Escape pos)), Eq (seq (SequencePart pos (Matter pos neseq seq)))) => Eq (Matter pos neseq seq)
+deriving instance (Eq pos, Eq a) => Eq (ClosePin pos a)
+deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Flat pos neseq)
+deriving instance Eq pos => Eq (MaybeFraction pos)
+deriving instance Eq pos => Eq (MaybeExponent pos)
+deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Text pos neseq)
+deriving instance Eq Quote
+deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (MoreText pos neseq)
+deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Joiner pos neseq)
+deriving instance Eq pos => Eq (Escape pos)
+deriving instance Eq pos => Eq (MoreBytes pos)
+deriving instance (Eq pos, Eq a) => Eq (SequencePart pos a)
+
+
 deriving instance Functor (ClosePin pos)
 deriving instance Functor (SequencePart pos)
 
@@ -158,3 +173,54 @@ mapSequence f = \case
     MetaGtF l x r y -> MetaGtF l x r y
     ParenF l x r -> ParenF l x r
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
+
+mapPositions :: (Functor seq, Functor neseq) => (pos -> pos') -> MatterF pos neseq seq a -> MatterF pos' neseq seq a
+{-# INLINE mapPositions #-}
+mapPositions f = \case
+    FlatF flt -> FlatF (flat flt)
+    VariantF l r x -> VariantF (f l) (f r) x
+    SequenceF l xs r -> SequenceF (f l) (fmap sequencePart xs) (f r)
+    MetaGtF l x r y -> MetaGtF (f l) x (f r) (closePin y)
+    ParenF l x r -> ParenF (f l) x (f r)
+    PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF (f l1) x (f r1) (f l2) y (f r2)
+  where
+    flat = \case
+        Atom l r -> Atom (f l) (f r)
+        Bytes l r more -> Bytes (f l) (f r) (moreBytes more)
+        Number l r fpart epart -> Number (f l) (f r) (fractionPart fpart) (exponentPart epart)
+        Text txt -> Text (text txt)
+
+    moreBytes = \case
+        NoMoreBytes -> NoMoreBytes
+        MoreBytes p l r more -> MoreBytes (f p) (f l) (f r) (moreBytes more)
+
+    fractionPart = \case
+        NothingFraction -> NothingFraction
+        JustFraction l r -> JustFraction (f l) (f r)
+
+    exponentPart = \case
+        NothingExponent -> NothingExponent
+        JustExponent l r -> JustExponent (f l) (f r)
+
+    text = \case
+        Suppressor p j txt -> Suppressor (f p) (joiner j) (text txt)
+        TextLiteral q l r more -> TextLiteral q (f l) (f r) (moreText more)
+
+    joiner = \case
+        NilJoiner l r -> NilJoiner (f l) (f r)
+        ConsJoiner l r escapes j -> ConsJoiner (f l) (f r) (fmap escape escapes) (joiner j)
+
+    escape (MkEscape p sz) = MkEscape (f p) sz
+
+    moreText = \case
+        NoMoreText -> NoMoreText
+        MoreText j txt -> MoreText (joiner j) (text txt)
+
+    sequencePart = \case
+        Item x -> Item x
+        MetaEQ l x r -> MetaEQ (f l) x (f r)
+
+    closePin = \case
+        NoClosePin y -> NoClosePin y
+        OnlyClosePin l y r -> OnlyClosePin (f l) y (f r)
+        BothPins l1 y1 r1 l2 y2 r2 -> BothPins (f l1) y1 (f r1) (f l2) y2 (f r2)

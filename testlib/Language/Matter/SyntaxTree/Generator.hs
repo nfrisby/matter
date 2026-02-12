@@ -1,4 +1,5 @@
 {-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Language.Matter.SyntaxTree.Generator (module Language.Matter.SyntaxTree.Generator) where
 
@@ -7,6 +8,7 @@ import Data.List.NonEmpty qualified as NE
 import Language.Matter.SyntaxTree
 import System.Random.SplitMix (mkSMGen)
 import Math.Combinat.Partitions.Integer qualified as Combinat
+import Test.QuickCheck (shrinkList)
 import Test.QuickCheck.Gen qualified as QC
 
 frequency :: NonEmpty (Int, QC.Gen a) -> QC.Gen a
@@ -125,3 +127,35 @@ generatePinMetaLT =
         x <- QC.resize l generateMatter
         y <- QC.resize r generateMatter
         pure $ PinMetaLT MkP x MkP MkP y MkP
+
+-----
+
+-- | TODO very incomplete
+shrinkMatter :: Matter pos neseq [] -> [Matter pos neseq []]
+shrinkMatter = \case
+    Flat flt -> map Flat $ flat flt
+    Variant l r x -> x  : [Variant l r x' | x' <- shrinkMatter x]
+    Sequence l xs r ->
+        (case xs of [Item x] -> (x :); [MetaEQ _l x _r] -> (x :); _ -> id) $ [ Sequence l xs' r | xs' <- shrinkList sequencePart xs ]
+    MetaGT _l x _r y -> x : case y of
+        NoClosePin y1 -> [y1]
+        OnlyClosePin _l1 y1 _r1 -> [y1]
+        BothPins _l1 y1 _r1 _l2 y2 _r2 -> [y1, y2]
+    Paren l x r -> x : [Paren l x' r | x' <- shrinkMatter x]
+    PinMetaLT l1 x r1 l2 y r2 ->
+        x : y : [ PinMetaLT l1 x' r1 l2 y r2 | x' <- shrinkMatter x ] ++ [ PinMetaLT l1 x r1 l2 y' r2 | y' <- shrinkMatter y ]
+  where
+    flat = \case
+        Atom{} -> []
+        Bytes _l _r NoMoreBytes -> []
+        Bytes _l _r (MoreBytes _p l r more) -> [Bytes l r more]
+        Number l r fpart epart -> case (fpart, epart) of
+            (NothingFraction, NothingExponent) -> []
+            (JustFraction{}, NothingExponent) -> [Number l r NothingFraction epart]
+            (NothingFraction, JustExponent{}) -> [Number l r fpart NothingExponent]
+            (JustFraction{}, JustExponent{}) -> [Number l r fpart NothingExponent,Number l r NothingFraction epart]
+        Text{} -> []
+
+    sequencePart = \case
+        Item x -> map Item $ shrinkMatter x
+        MetaEQ l x r -> [MetaEQ l x' r | x' <- shrinkMatter x]

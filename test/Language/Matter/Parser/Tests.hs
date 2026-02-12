@@ -5,6 +5,7 @@ module Language.Matter.Parser.Tests (tests) where
 import Control.Monad (foldM, unless)
 import Data.Functor ((<&>))
 import Data.List.NonEmpty (NonEmpty)
+import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
 import Data.Word (Word32)
 import Language.Matter.Parser qualified as P
@@ -12,9 +13,10 @@ import Language.Matter.Tokenizer
 import Language.Matter.Tokenizer.Pretty (prettyToken, toLazyText)
 import Language.Matter.Tokenizer.Tests (printWithPositions)
 import Language.Matter.SyntaxTree qualified as ST
-import Language.Matter.SyntaxTree.Generator (generateMatter)
+import Language.Matter.SyntaxTree.Generator (generateMatter, shrinkMatter)
 import Language.Matter.SyntaxTree.Pretty (pretty)
 import System.Exit (exitFailure)
+import System.Random (mkStdGen)
 import System.Random.Stateful (getStdGen, runStateGen_)
 import Test.QuickCheck qualified as QC
 
@@ -35,6 +37,8 @@ tests = do
             TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: ST.Matter ST.P NonEmpty [])
             putStrLn ""
     QC.sample' (QC.sized $ \sz -> (,) sz <$> generateMatter) >>= mapM_ f
+
+    QC.quickCheckWith QC.stdArgs{QC.maxSuccess = 100000} prop_prettyThenParseIsSame
 
 -----
 
@@ -157,3 +161,42 @@ parseWhole x =
             EofError e -> TokenizerError (tokenizerStart k) (tokenizerCurrent k) (Right e)
         P.SnocsError l r e -> TokenizerError l r (Left e)
         P.SnocsStuck stk l tk r -> ParseStuck l (Just tk) r stk
+
+-----
+
+-- | Render random Matter to a 'TL.Text', then parse it, then require
+-- equivalence at type 'Matter'.
+prop_prettyThenParseIsSame :: QC.Property
+prop_prettyThenParseIsSame =
+    QC.propertyForAllShrinkShow gen shrnk noshow prop
+  where
+    gen = liftA2 (,) (QC.choose (minBound, maxBound)) generateMatter
+    shrnk (g, m) = [ (g, m') | m' <- shrinkMatter m]
+    noshow _ = []
+
+    forgetPos = ST.fold $ ST.embed . ST.mapPositions (\_ -> ST.MkP)
+
+    prop (g, m) =
+        let txt =
+                runStateGen_ (mkStdGen g)
+              $ \g' -> toLazyText
+              $ foldMap (prettyToken g')
+              $ pretty (m :: ST.Matter ST.P NonEmpty [])
+        in
+        QC.counterexample ("m = " <> show m)
+      $ QC.counterexample ("g = " <> show g)
+      $ QC.counterexample ("txt = " <> TL.unpack txt)
+      $ case parseWhole txt of
+            ParseDone m' ->
+                QC.counterexample ("m' = " <> show m')
+              $ QC.counterexample "ParseDone"
+              $ m == forgetPos m'
+            ParseStuck l mbTk r stk ->
+                QC.counterexample ("stk = " <> show stk)
+              $ QC.counterexample ("(l, mbTk, r) = " <> show (l, mbTk, r))
+              $ QC.counterexample "ParseStuck"
+              $ QC.property False
+            TokenizerError l r e ->
+                QC.counterexample ("(l, e, r) = " <> show (l, e, r))
+              $ QC.counterexample "TokenizerError"
+              $ QC.property False
