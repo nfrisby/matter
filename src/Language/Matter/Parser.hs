@@ -259,9 +259,16 @@ snoc l r = curry $ \case
 
     (_stk, SdToken (SdOpenMeta LT)) -> Nothing
 
+    ----------------------------------------
+    -- Every case below this line must only use @'simplify' stk@,
+    -- never just @stk@.
+    --
+    -- Sadly, if I were to enforce that with @(stk, tk) -> f (simplify
+    -- stk) tk@, the pattern checker would consider @f@ partial.
+
     -- @
     (stk, OdToken OdAtom) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Atom l r
+        push (simplify stk) $ parseAlgebra $ ST.FlatF $ ST.Atom l r
     -- 0
     (stk, OdToken OdIntegerPart) ->
         Just $ Flat (IntegerPart l r) $ simplify stk
