@@ -5,9 +5,12 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+
+{-# OPTIONS_GHC -fmax-pmcheck-models=60 #-}
 
 module Language.Matter.Parser (
     MatterParse (..),
@@ -31,43 +34,34 @@ import Data.Kind (Type)
 import GHC.Show (showSpace)
 import Language.Matter.Tokenizer (OdToken (..), Pos (..), SdToken (..), Token (..))
 import Language.Matter.Tokenizer qualified as T
-import Language.Matter.Tokenizer.Counting (Three (..), Four)
 import Language.Matter.SyntaxTree qualified as ST
 
 data FLAT =
     I | F
   |
-    U | T | Jt1 | Jt2 | Jt3
+    U | T | Jo ST.JOINER | Jc
   |
-    B | Jb
+    B | Jb1 | Jb2
 
 class SingI a where singI :: a
 
-data JoinerFollows :: FLAT -> Type where
-    JoinerFollowsU   :: JoinerFollows U
-    JoinerFollowsT   :: JoinerFollows T
-    JoinerFollowsJt2 :: JoinerFollows Jt2
+data UT :: FLAT -> Type where
+    SingU   :: UT U
+    SingT   :: UT T
 
-instance SingI (JoinerFollows U)   where singI = JoinerFollowsU
-instance SingI (JoinerFollows T)   where singI = JoinerFollowsT
-instance SingI (JoinerFollows Jt2) where singI = JoinerFollowsJt2
+instance SingI (UT U)   where singI = SingU
+instance SingI (UT T)   where singI = SingT
 
-joinerFollowsOf :: SingI (JoinerFollows x) => Flat x -> JoinerFollows x
-joinerFollowsOf _fstk = singI
-
-data EscapeFollows :: FLAT -> Type where
-    EscapeFollowsJt1 :: EscapeFollows Jt1
-    EscapeFollowsJt2 :: EscapeFollows Jt2
-
-instance SingI (EscapeFollows Jt1) where singI = EscapeFollowsJt1
-instance SingI (EscapeFollows Jt2) where singI = EscapeFollowsJt2
-
-escapeFollowsOf :: SingI (EscapeFollows x) => Flat x -> EscapeFollows x
-escapeFollowsOf _fstk = singI
+utOf :: SingI (UT x) => Flat x -> UT x
+utOf _fstk = singI
 
 -- | Matter expressions that can't contain arbitrary matter expressions
 --
--- This is a recursive type only because of joiners and (within one joiner) escapes.
+-- This is a recursive type only because of joiners.
+--
+-- Unlike 'ST.Joiner', the 'ST.JOINER' indices indicate what is on the
+-- top of the stack. Note how that means it's matches what precedes
+-- whatever is /juxtaposed after/ that stack.
 data Flat :: FLAT -> Type where
     -- | 1
     IntegerPart :: Pos -> Pos -> Flat I
@@ -75,26 +69,30 @@ data Flat :: FLAT -> Type where
     FractionPart :: Pos -> Pos -> Flat I -> Flat F
 
     -- | _
-    Suppressor :: Pos -> Flat U   -- must be followed by a joiner
-    -- | "hi"
+    Suppressor :: Pos -> Flat U
+    -- | @"hi"@
     Text :: ST.Quote -> Pos -> Pos -> Flat T
-    -- | <a> and a>
-    SdJoiner :: SingI (JoinerFollows x) => Pos -> Pos -> Flat x -> Flat Jt3   -- must be followed by suppressor or text
-    -- | <a and a
-    OdJoiner :: SingI (JoinerFollows x) => Pos -> Pos -> Flat x -> Flat Jt1   -- must be followed by an escape
-    -- | %21
-    Escape :: SingI (EscapeFollows x) => Pos -> Four -> Flat x -> Flat Jt2    -- must be followed by escape or SdJoiner
-    -- | _ after joiner
-    MoreSuppressor :: Pos -> Flat Jt3 -> Flat U   -- must be followed by a joiner
-    -- | "hi" after joiner
-    MoreText :: ST.Quote -> Pos -> Pos -> Flat Jt3 -> Flat T
+    -- | @<@
+    OpenTextJoiner :: SingI (UT x) => Pos -> Flat x -> Flat (Jo j)
+    -- | foobar
+    JoinerText :: Pos -> Pos -> Flat (Jo ST.Je) -> Flat (Jo ST.Jt)
+    -- | %25
+    Escapes :: NonEmpty (ST.Escape Pos) -> Flat (Jo ST.Jt) -> Flat (Jo ST.Je)
+    -- | @>@
+    CloseTextJoiner :: Pos -> Flat (Jo j) -> Flat Jc
+    -- | @_@ after joiner
+    MoreSuppressor :: Pos -> Flat Jc -> Flat U
+    -- | @"hi"@ after joiner
+    MoreText :: ST.Quote -> Pos -> Pos -> Flat Jc -> Flat T
 
     -- | 0xAB
     Bytes :: Pos -> Pos -> Flat B
-    -- | only <>
-    BytesJoiner :: Pos -> Flat B -> Flat Jb   -- must be followed by bytes
+    -- | only @>@
+    OpenBytesJoiner :: Pos -> Flat B -> Flat Jb1   -- must be followed by bytes
+    -- | only @>@
+    CloseBytesJoiner :: Pos -> Flat Jb1 -> Flat Jb2   -- must be followed by bytes
     -- | 0xAB after joiner
-    MoreBytes :: Pos -> Pos -> Flat Jb -> Flat B
+    MoreBytes :: Pos -> Pos -> Flat Jb2 -> Flat B
 
 -----
 
@@ -181,73 +179,80 @@ snoc l r = curry $ \case
     (_stk, OdToken OdFractionPart) -> Nothing
     (_stk, OdToken OdExponentPart) -> Nothing
 
-    -- OdJoiner and Escape frames
-    (Flat (OdJoiner l1 r1 flt) stk, SdToken (SdJoinerEscapedUtf8 size)) ->
-        Just $ Flat (Escape l size $ OdJoiner l1 r1 flt) stk
-    (Flat OdJoiner{} _stk, _) -> Nothing
-    (Flat (Escape l1 size flt) stk, SdToken (SdJoinerEscapedUtf8 size')) ->
-        Just $ Flat (Escape l size' $ Escape l1 size flt) stk
-    (Flat (Escape l1 size flt) stk, OdToken (OdJoinerNotEscaped False)) ->
-        Just $ Flat (OdJoiner l r $ Escape l1 size flt) stk
-    (Flat (Escape l1 size flt) stk, SdToken (SdJoinerNotEscaped Three3)) ->
-        Just $ Flat (SdJoiner l r $ Escape l1 size flt) stk
-    (Flat Escape{} _stk, _) -> Nothing
+    -- SdCloseJoiner
+    (Flat fstk@OpenTextJoiner{} stk, SdToken SdCloseJoiner) ->
+        Just $ Flat (CloseTextJoiner l fstk) stk
+    (Flat fstk@JoinerText{} stk, SdToken SdCloseJoiner) ->
+        Just $ Flat (CloseTextJoiner l fstk) stk
+    (Flat fstk@Escapes{} stk, SdToken SdCloseJoiner) ->
+        Just $ Flat (CloseTextJoiner l fstk) stk
+    (Flat fstk@OpenBytesJoiner{} stk, SdToken SdCloseJoiner) ->
+        Just $ Flat (CloseBytesJoiner l fstk) stk
+    (_stk, SdToken SdCloseJoiner) -> Nothing
+
+    -- OpenTextJoiner, JoinerText, and Escape frames
+    (Flat (OpenTextJoiner p fstk) stk, OdToken OdJoinerText) ->
+        -- We unbox and rebox the OpenTextJoiner so that its index's
+        -- JOINER type can change.
+        Just $ Flat (JoinerText l r $ OpenTextJoiner p fstk) stk
+    (Flat (OpenTextJoiner p fstk) stk, SdToken (SdJoinerEscapedUtf8 size)) ->
+        -- We unbox and rebox the OpenTextJoiner so that its index's
+        -- JOINER type can change.
+        Just $ Flat (Escapes (NE.singleton (ST.MkEscape l size)) $ OpenTextJoiner p fstk) stk
+    (Flat OpenTextJoiner{} _stk, _) -> Nothing
+
+    (Flat fstk@JoinerText{} stk, SdToken (SdJoinerEscapedUtf8 size)) ->
+        Just $ Flat (Escapes (NE.singleton (ST.MkEscape l size)) fstk) stk
+    (Flat JoinerText{} _stk, _) -> Nothing
+
+    (Flat (Escapes escapes fstk) stk, SdToken (SdJoinerEscapedUtf8 size)) ->
+        Just $ Flat (Escapes (ST.MkEscape l size `NE.cons` escapes) fstk) stk
+    (Flat fstk@Escapes{} stk, OdToken OdJoinerText) ->
+        Just $ Flat (JoinerText l r fstk) stk
+    (Flat Escapes{} _stk, _) -> Nothing
 
     (_stk, SdToken SdJoinerEscapedUtf8{}) -> Nothing
-    (_stk, OdToken (OdJoinerNotEscaped False)) -> Nothing
-    (_stk, SdToken (SdJoinerNotEscaped Three3)) -> Nothing
-
+    (_stk, OdToken OdJoinerText) -> Nothing
 
     -- Whitespace tokens, this MUST come after numbers and incomplete
     -- text joiners, since those disallow whitespace!
     (stk, OdToken OdWhitespace) -> Just stk
 
     -- Suppressor frames
-    (Flat (Suppressor p1) stk, OdToken (OdJoinerNotEscaped True)) ->
-        Just $ Flat (OdJoiner l r $ Suppressor p1) stk
-    (Flat (Suppressor p1) stk, SdToken (SdJoinerNotEscaped _)) ->
-        Just $ Flat (SdJoiner l r $ Suppressor p1) stk
+    (Flat fstk@Suppressor{} stk, OdToken OdOpenJoiner) ->
+        Just $ Flat (OpenTextJoiner l fstk) stk
     (Flat Suppressor{} _stk, _tk) -> Nothing
-    (Flat (MoreSuppressor p1 flt) stk, OdToken (OdJoinerNotEscaped True)) ->
-        Just $ Flat (OdJoiner l r $ MoreSuppressor p1 flt) stk
-    (Flat (MoreSuppressor p1 flt) stk, SdToken (SdJoinerNotEscaped _)) ->
-        Just $ Flat (SdJoiner l r $ MoreSuppressor p1 flt) stk
+    (Flat fstk@MoreSuppressor{} stk, OdToken OdOpenJoiner) ->
+        Just $ Flat (OpenTextJoiner l fstk) stk
     (Flat MoreSuppressor{} _stk, _tk) -> Nothing
 
     -- Text frames
-    (Flat (Text q l1 r1) stk, OdToken (OdJoinerNotEscaped True)) ->
-        Just $ Flat (OdJoiner l r $ Text q l1 r1) stk
-    (Flat (Text q l1 r1) stk, SdToken (SdJoinerNotEscaped _)) ->
-        Just $ Flat (SdJoiner l r $ Text q l1 r1) stk
-    (Flat (MoreText q l1 r1 flt) stk, OdToken (OdJoinerNotEscaped True)) ->
-        Just $ Flat (OdJoiner l r $ MoreText q l1 r1 flt) stk
-    (Flat (MoreText q l1 r1 flt) stk, SdToken (SdJoinerNotEscaped _)) ->
-        Just $ Flat (SdJoiner l r $ MoreText q l1 r1 flt) stk
+    (Flat fstk@Text{} stk, OdToken OdOpenJoiner) ->
+        Just $ Flat (OpenTextJoiner l fstk) stk
+    (Flat fstk@MoreText{} stk, OdToken OdOpenJoiner) ->
+        Just $ Flat (OpenTextJoiner l fstk) stk
 
-    (_stk, OdToken (OdJoinerNotEscaped True)) -> Nothing
-
-    -- SdJoiner frames
-    (Flat (SdJoiner l1 r1 flt) stk, SdToken SdUnderscore) ->
-        Just $ Flat (MoreSuppressor l $ SdJoiner l1 r1 flt) stk
-    (Flat (SdJoiner l1 r1 flt) stk, SdToken SdDoubleQuotedString) ->
-        Just $ Flat (MoreText ST.DoubleQuote l r $ SdJoiner l1 r1 flt) stk
-    (Flat (SdJoiner l1 r1 flt) stk, SdToken (SdMultiQuotedString delim)) ->
-        Just $ Flat (MoreText (ST.MultiQuote delim) l r $ SdJoiner l1 r1 flt) stk
-    (Flat SdJoiner{} _stk, _tk) -> Nothing
+    -- CloseTextJoiner frames
+    (Flat fstk@CloseTextJoiner{} stk, SdToken SdUnderscore) ->
+        Just $ Flat (MoreSuppressor l fstk) stk
+    (Flat fstk@CloseTextJoiner{} stk, SdToken SdDoubleQuotedString) ->
+        Just $ Flat (MoreText ST.DoubleQuote l r fstk) stk
+    (Flat fstk@CloseTextJoiner{} stk, SdToken (SdMultiQuotedString delim)) ->
+        Just $ Flat (MoreText (ST.MultiQuote delim) l r fstk) stk
+    (Flat CloseTextJoiner{} _stk, _tk) -> Nothing
 
     -- All bytes frames
-    (Flat (Bytes l1 r1) stk, SdToken (SdJoinerNotEscaped _)) ->
-        if not $ emptyJoiner l r then Nothing else
-        Just $ Flat (BytesJoiner l $ Bytes l1 r1) stk
-    (Flat (BytesJoiner p1 flt) stk, OdToken OdBytes) ->
-        Just $ Flat (MoreBytes l r $ BytesJoiner p1 flt) stk
-    (Flat BytesJoiner{} _stk, _tk) -> Nothing
-    (Flat (MoreBytes l1 r1 flt) stk, SdToken (SdJoinerNotEscaped _)) ->
-        if not $ emptyJoiner l r then Nothing else
-        Just $ Flat (BytesJoiner l $ MoreBytes l1 r1 flt) stk
+    (Flat fstk@Bytes{} stk, OdToken OdOpenJoiner) ->
+        Just $ Flat (OpenBytesJoiner l fstk) stk
 
-    (_stk, SdToken (SdJoinerNotEscaped Three1)) -> Nothing
-    (_stk, SdToken (SdJoinerNotEscaped Three2)) -> Nothing
+    (Flat fstk@CloseBytesJoiner{} stk, OdToken OdBytes) ->
+        Just $ Flat (MoreBytes l r fstk) stk
+    (Flat CloseBytesJoiner{} _stk, _tk) -> Nothing
+
+    (Flat fstk@MoreBytes{} stk, OdToken OdOpenJoiner) ->
+        Just $ Flat (OpenBytesJoiner l fstk) stk
+
+    (_, OdToken OdOpenJoiner) -> Nothing
 
     -- PinParen and PinPin frames
     (PinParen l1 m1 r1 stk, SdToken (SdOpenMeta LT)) ->
@@ -344,9 +349,6 @@ snoc l r = curry $ \case
                 push stk' $ parseAlgebra $ ST.MetaGtF l1 m1 r1 (ST.BothPins l2 m2 r2 p3 m3 l)
             _ -> Nothing
 
-emptyJoiner :: Pos -> Pos -> Bool
-emptyJoiner (MkPos x) (MkPos y) = x + 1 == y
-
 -----
 
 simplify :: MatterParse a => Stk a -> Stk a
@@ -393,54 +395,55 @@ popFlat = \case
     FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
     Suppressor{} -> Nothing
     x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text $ popT ST.NoMoreText x
-    SdJoiner{} -> Nothing
-    OdJoiner{} -> Nothing
-    Escape{} -> Nothing
+    OpenTextJoiner{} -> Nothing
+    JoinerText{} -> Nothing
+    Escapes{} -> Nothing
+    CloseTextJoiner{} -> Nothing
     MoreSuppressor{} -> Nothing
     x@MoreText{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text $ popT ST.NoMoreText x
     x@Bytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes ST.NoMoreBytes x
-    BytesJoiner{} -> Nothing
+    OpenBytesJoiner{} -> Nothing
+    CloseBytesJoiner{} -> Nothing
     x@MoreBytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes ST.NoMoreBytes x
 
 popT :: ST.MoreText Pos NonEmpty -> Flat T -> ST.Text Pos NonEmpty
 popT acc = \case
-
     Text q l r -> ST.TextLiteral q l r acc
-    MoreText q l r (SdJoiner l1 r1 fstk) -> case popJoinerFollows (ST.NilJoiner l1 r1) fstk of
-        (j, fstk') -> popUT j (ST.TextLiteral q l r acc) fstk'
+    MoreText q l r (CloseTextJoiner p fstk) -> case popSomeJo (ST.NilJoiner p) fstk of
+        PoppedTextJoiner jp j fstk' -> popUT jp j (ST.TextLiteral q l r acc) fstk'
 
-popUT :: ST.Joiner Pos NonEmpty -> ST.Text Pos NonEmpty -> Either (Flat U) (Flat T) -> ST.Text Pos NonEmpty
-popUT j acc = \case
+data PoppedTextJoiner where
+    PoppedTextJoiner :: SingI (UT x) => !Pos -> !(ST.Joiner Pos NonEmpty j) -> !(Flat x) -> PoppedTextJoiner
 
-    Left (Suppressor p) -> ST.Suppressor p j acc
-    Left (MoreSuppressor p (SdJoiner l1 r1 fstk)) -> case popJoinerFollows (ST.NilJoiner l1 r1) fstk of
-        (j', fstk') -> popUT j' (ST.Suppressor p j acc) fstk'
+popUT :: SingI (UT x) => Pos -> ST.Joiner Pos NonEmpty j -> ST.Text Pos NonEmpty -> Flat x -> ST.Text Pos NonEmpty
+popUT jp j acc fstk = case (utOf fstk, fstk) of
 
-    Right fstk -> popT (ST.MoreText j acc) fstk
+    (SingU, Suppressor p) -> ST.Suppressor p jp j acc
+    (SingU, MoreSuppressor p2 (CloseTextJoiner p1 fstk')) -> case popSomeJo (ST.NilJoiner p1) fstk' of
+        PoppedTextJoiner jp' j' fstk'' -> popUT jp' j' (ST.Suppressor p2 jp j acc) fstk''
 
-popJoinerFollows ::
-    SingI (JoinerFollows x)
- =>
-    ST.Joiner Pos NonEmpty -> Flat x -> (ST.Joiner Pos NonEmpty, Either (Flat U) (Flat T))
-popJoinerFollows j fstk = case joinerFollowsOf fstk of
+    (SingT, fstk') -> popT (ST.MoreText jp j acc) fstk'
 
-    JoinerFollowsU -> (j, Left fstk)
-    JoinerFollowsT -> (j, Right fstk)
+popSomeJo :: (forall j'. ST.Joiner Pos NonEmpty j') -> Flat (Jo j) -> PoppedTextJoiner
+popSomeJo j = \case
+    OpenTextJoiner p fstk -> PoppedTextJoiner p j fstk
+    JoinerText l r fstk -> popJoJe (ST.ConsJoinerText l r j) fstk
+    Escapes escapes fstk -> popJoJt (ST.ConsJoinerEscapes (NE.reverse escapes) j) fstk
 
-    JoinerFollowsJt2 -> popJt2 [] j fstk
+popJoJe :: ST.Joiner Pos NonEmpty ST.Je -> Flat (Jo ST.Je) -> PoppedTextJoiner
+popJoJe j = \case
+    OpenTextJoiner p fstk -> PoppedTextJoiner p j fstk
+    Escapes escapes fstk -> popJoJt (ST.ConsJoinerEscapes (NE.reverse escapes) j) fstk
 
-popJt2 :: [ST.Escape Pos] -> ST.Joiner Pos NonEmpty -> Flat Jt2 -> (ST.Joiner Pos NonEmpty, Either (Flat U) (Flat T))
-popJt2 acc j (Escape p size fstk) = case (escapeFollowsOf fstk, fstk) of
-
-    (EscapeFollowsJt2, fstk') -> popJt2 (ST.MkEscape p size : acc) j fstk'
-
-    (EscapeFollowsJt1, OdJoiner l r fstk') ->
-        popJoinerFollows (ST.ConsJoiner l r (ST.MkEscape p size NE.:| acc) j) fstk'
+popJoJt :: ST.Joiner Pos NonEmpty ST.Jt -> Flat (Jo ST.Jt) -> PoppedTextJoiner
+popJoJt j = \case
+    OpenTextJoiner p fstk -> PoppedTextJoiner p j fstk
+    JoinerText l r fstk -> popJoJe (ST.ConsJoinerText l r j) fstk
 
 popBytes :: ST.MoreBytes Pos -> Flat B -> ST.Flat Pos NonEmpty
 popBytes acc = \case
     Bytes l r -> ST.Bytes l r acc
-    MoreBytes l r (BytesJoiner p fstk) -> popBytes (ST.MoreBytes p l r acc) fstk
+    MoreBytes l r (CloseBytesJoiner _r (OpenBytesJoiner p fstk)) -> popBytes (ST.MoreBytes p l r acc) fstk
 
 -----
 
@@ -837,53 +840,63 @@ instance Show (Flat x) where
                          showSpace
                          (showsPrec 11 b3_a2lz))))))
     showsPrec
-      a_a2lA
-      (SdJoiner b1_a2lB b2_a2lC b3_a2lD)
-      = showParen
-          (a_a2lA >= 11)
-          ((.)
-             (showString "SdJoiner ")
-             ((.)
-                (showsPrec 11 b1_a2lB)
-                ((.)
-                   showSpace
-                   ((.)
-                      (showsPrec 11 b2_a2lC)
-                      ((.)
-                         showSpace
-                         (showsPrec 11 b3_a2lD))))))
-    showsPrec
-      a_a2lE
-      (OdJoiner b1_a2lF b2_a2lG b3_a2lH)
-      = showParen
-          (a_a2lE >= 11)
-          ((.)
-             (showString "OdJoiner ")
-             ((.)
-                (showsPrec 11 b1_a2lF)
-                ((.)
-                   showSpace
-                   ((.)
-                      (showsPrec 11 b2_a2lG)
-                      ((.)
-                         showSpace
-                         (showsPrec 11 b3_a2lH))))))
-    showsPrec
       a_a2lI
-      (Escape b1_a2lJ b2_a2lK b3_a2lL)
+      (OpenTextJoiner b2_a2lK b3_a2lL)
       = showParen
           (a_a2lI >= 11)
           ((.)
-             (showString "Escape ")
-             ((.)
-                (showsPrec 11 b1_a2lJ)
+             (showString "OpenTextJoiner ")
                 ((.)
                    showSpace
                    ((.)
                       (showsPrec 11 b2_a2lK)
                       ((.)
                          showSpace
-                         (showsPrec 11 b3_a2lL))))))
+                         (showsPrec 11 b3_a2lL)))))
+    showsPrec
+      a_a2lq
+      (JoinerText b1_a2lr b2_a2ls b3_a2lt)
+      = showParen
+          (a_a2lq >= 11)
+          ((.)
+             (showString "JoinerText ")
+             ((.)
+                (showsPrec 11 b1_a2lr)
+                ((.)
+                   showSpace
+                   ((.)
+                      (showsPrec 11 b2_a2ls)
+                      ((.)
+                         showSpace
+                         (showsPrec 11 b3_a2lt))))))
+    showsPrec
+      a_a2lI
+      (Escapes b2_a2lK b3_a2lL)
+      = showParen
+          (a_a2lI >= 11)
+          ((.)
+             (showString "Escapes ")
+                ((.)
+                   showSpace
+                   ((.)
+                      (showsPrec 11 b2_a2lK)
+                      ((.)
+                         showSpace
+                         (showsPrec 11 b3_a2lL)))))
+    showsPrec
+      a_a2lI
+      (CloseTextJoiner b2_a2lK b3_a2lL)
+      = showParen
+          (a_a2lI >= 11)
+          ((.)
+             (showString "CloseTextJoiner ")
+                ((.)
+                   showSpace
+                   ((.)
+                      (showsPrec 11 b2_a2lK)
+                      ((.)
+                         showSpace
+                         (showsPrec 11 b3_a2lL)))))
     showsPrec
       a_a2lM
       (MoreSuppressor b1_a2lN b2_a2lO)
@@ -931,11 +944,23 @@ instance Show (Flat x) where
                    (showsPrec 11 b2_a2lW))))
     showsPrec
       a_a2lX
-      (BytesJoiner b1_a2lY b2_a2lZ)
+      (OpenBytesJoiner b1_a2lY b2_a2lZ)
       = showParen
           (a_a2lX >= 11)
           ((.)
-             (showString "BytesJoiner ")
+             (showString "OpenBytesJoiner ")
+             ((.)
+                (showsPrec 11 b1_a2lY)
+                ((.)
+                   showSpace
+                   (showsPrec 11 b2_a2lZ))))
+    showsPrec
+      a_a2lX
+      (CloseBytesJoiner b1_a2lY b2_a2lZ)
+      = showParen
+          (a_a2lX >= 11)
+          ((.)
+             (showString "CloseBytesJoiner ")
              ((.)
                 (showsPrec 11 b1_a2lY)
                 ((.)

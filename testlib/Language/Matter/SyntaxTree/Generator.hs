@@ -1,3 +1,4 @@
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 
@@ -98,42 +99,49 @@ generateText' =
         QC.sized $ \sz ->
             if sz < 2 then lit NoMoreText else
             frequency
-              $  ((1, QC.resize (max 1 sz - 1) joinerText >>= \(j, txt) -> lit (MoreText j txt))            NE.:|)
-              $ ([(1, QC.resize (      sz - 1) joinerText <&> \(j, txt) -> Suppressor MkP j txt) | sz <= 3] ++)
+              $  ((1, QC.resize (max 1 sz - 1) moreText >>= \(MkSomeJoiner j, txt) -> lit (MoreText MkP j txt))            NE.:|)
+              $ ([(1, QC.resize (      sz - 1) moreText <&> \(MkSomeJoiner j, txt) -> Suppressor MkP MkP j txt) | sz <= 3] ++)
               $ []
 
     lit more =
         generateQuote <&> \q -> TextLiteral q MkP MkP more
 
-    joinerText =
+    moreText =
         QC.sized $ \sz ->
-            if sz < 2 then lit NoMoreText <&> \txt -> (NilJoiner MkP MkP, txt) else do
-                l <-
+            if sz < 2 then lit NoMoreText <&> \txt -> (MkSomeJoiner (NilJoiner MkP), txt) else do
+                jsz <-
                     frequency
                       $  ((90,                         pure 1  )            NE.:|)
                       $ ([( 9, QC.choose ( 2, min (sz - 1)  3) ) |  2 < sz] ++)
                       $ ([( 1, QC.choose (10, min (sz - 1) 20) ) | 10 < sz] ++)
                       $ []
-                let r = sz - l
-                (,) <$> QC.resize l joiner <*> QC.resize r text
+                (,) <$> QC.resize jsz joiner <*> QC.resize (sz - jsz) text
 
     joiner =
         QC.sized $ \sz ->
-            if sz < 2 then pure (NilJoiner MkP MkP) else do
-                l <-
+            if sz < 2 then pure (MkSomeJoiner $ NilJoiner MkP) else do
+            frequency $ (9, MkSomeJoiner <$> joinerText) NE.:| [(1, MkSomeJoiner <$> joinerEscapes)]
+
+    joinerText =
+        QC.sized $ \sz ->
+            if sz < 2 then pure (NilJoiner MkP) else do
+            ConsJoinerText MkP MkP <$> QC.resize (sz - 1) joinerEscapes
+
+    joinerEscapes =
+        QC.sized $ \sz ->
+            if sz < 2 then pure (NilJoiner MkP) else do
+                n <-
                     frequency
                       $  ((90,                        pure 1  )           NE.:|)
                       $ ([( 9,                        pure 2  ) | 2 < sz] ++)
                       $ ([( 1, QC.choose (5, min (sz - 1) 10) ) | 5 < sz] ++)
                       $ []
-                let r = sz - l
-                ConsJoiner MkP MkP <$> QC.resize l escapes <*> QC.resize r joiner
-
-    escapes =
-        QC.sized $ \sz ->
-            (NE.:|) <$> escape <*> QC.vectorOf (max 1 sz - 1) escape
+                escapes <- (NE.:|) <$> escape <*> QC.vectorOf (n - 1) escape
+                ConsJoinerEscapes escapes <$> QC.resize (sz - n) joinerText
 
     escape = MkEscape MkP <$> generateFour
+
+data SomeJoiner = forall j. MkSomeJoiner !(Joiner P NonEmpty j)
 
 generateQuote :: QC.Gen Quote
 generateQuote =

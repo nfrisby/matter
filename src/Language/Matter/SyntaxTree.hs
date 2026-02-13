@@ -1,6 +1,9 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -8,6 +11,8 @@
 module Language.Matter.SyntaxTree (module Language.Matter.SyntaxTree) where
 
 import Data.Functor.Foldable qualified as F
+import Data.Kind (Type)
+import Data.Type.Equality ((:~:) (Refl), TestEquality (testEquality))
 import Language.Matter.Tokenizer.Counting (D10, Four, Four')
 
 -- | Isomorph of @()@, easier on the eyes
@@ -55,7 +60,7 @@ data MoreBytes pos = NoMoreBytes | MoreBytes !pos !pos !pos (MoreBytes pos)
 -----
 
 data Text pos neseq =
-    Suppressor !pos (Joiner pos neseq) (Text pos neseq)
+    forall j. Suppressor !pos !pos (Joiner pos neseq j) (Text pos neseq)
   |
     TextLiteral !Quote !pos !pos (MoreText pos neseq)
 
@@ -64,9 +69,22 @@ data Quote =
   |
     MultiQuote !(Four' D10)
 
-data MoreText pos neseq = NoMoreText | MoreText (Joiner pos neseq) (Text pos neseq)
+data MoreText pos neseq = NoMoreText | forall j. MoreText !pos (Joiner pos neseq j) (Text pos neseq)
 
-data Joiner pos neseq = NilJoiner !pos !pos | ConsJoiner !pos !pos (neseq (Escape pos)) (Joiner pos neseq)
+data JOINER =
+    -- | a joiner that can only be followed by escapes
+    Je
+  |
+    -- | a joiner that can only be followed by text
+    Jt
+
+-- | a joiner, excluding the position of its @<@
+--
+-- The index of a 'Joiner' indicates what /preceded/ it.
+data Joiner :: Type -> (Type -> Type) -> JOINER -> Type where
+    NilJoiner         :: !pos                                         -> Joiner pos neseq j
+    ConsJoinerText    :: !pos -> !pos          -> Joiner pos neseq Jt -> Joiner pos neseq Je
+    ConsJoinerEscapes :: !(neseq (Escape pos)) -> Joiner pos neseq Je -> Joiner pos neseq Jt
 
 data Escape pos = MkEscape !pos !Four
 
@@ -88,7 +106,7 @@ deriving instance Show pos => Show (MaybeExponent pos)
 deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Text pos neseq)
 deriving instance Show Quote
 deriving instance (Show pos, Show (neseq (Escape pos))) => Show (MoreText pos neseq)
-deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Joiner pos neseq)
+deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Joiner pos neseq j)
 deriving instance Show pos => Show (Escape pos)
 deriving instance Show pos => Show (MoreBytes pos)
 deriving instance (Show pos, Show a) => Show (SequencePart pos a)
@@ -99,17 +117,37 @@ deriving instance (Eq pos, Eq a) => Eq (ClosePin pos a)
 deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Flat pos neseq)
 deriving instance Eq pos => Eq (MaybeFraction pos)
 deriving instance Eq pos => Eq (MaybeExponent pos)
-deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Text pos neseq)
+instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Text pos neseq) where
+    Suppressor p1 p1' j1 txt1 == Suppressor p2 p2' j2 txt2 = p1 == p2 && p1' == p2' && joinerEquality j1 j2 && txt1 == txt2
+    TextLiteral q1 l1 r1 more1 == TextLiteral q2 l2 r2 more2 = q1 == q2 && l1 == l2 && r1 == r2 && more1 == more2
+    _ == _ = False
 deriving instance Eq Quote
-deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (MoreText pos neseq)
-deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Joiner pos neseq)
+instance (Eq pos, Eq (neseq (Escape pos))) => Eq (MoreText pos neseq) where
+    NoMoreText == NoMoreText = True
+    MoreText p1 j1 txt1 == MoreText p2 j2 txt2 = p1 == p2 && joinerEquality j1 j2 && txt1 == txt2
+    _ == _ = False
+deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Joiner pos neseq j)
 deriving instance Eq pos => Eq (Escape pos)
 deriving instance Eq pos => Eq (MoreBytes pos)
 deriving instance (Eq pos, Eq a) => Eq (SequencePart pos a)
 
-
 deriving instance Functor (ClosePin pos)
 deriving instance Functor (SequencePart pos)
+
+instance TestEquality (Joiner pos neseq) where
+    testEquality = curry $ \case
+        (NilJoiner{}        , NilJoiner{}        ) -> Nothing
+        (ConsJoinerText{}   , ConsJoinerText{}   ) -> Just Refl
+        (ConsJoinerEscapes{}, ConsJoinerEscapes{}) -> Just Refl
+        _ -> Nothing
+
+-- | Note that the arguments can have different indices
+joinerEquality :: (Eq pos, Eq (neseq (Escape pos))) => Joiner pos neseq x -> Joiner pos neseq y -> Bool
+joinerEquality = curry $ \case
+    (NilJoiner p1                 , NilJoiner p2                 ) -> p1 == p2
+    (ConsJoinerText l1 r1 j1      , ConsJoinerText l2 r2 j2      ) -> l1 == l2 && r1 == r2 && joinerEquality j1 j2
+    (ConsJoinerEscapes escapes1 j1, ConsJoinerEscapes escapes2 j2) -> escapes1 == escapes2 && joinerEquality j1 j2
+    _ -> False
 
 -----
 
@@ -164,7 +202,12 @@ fold = F.fold
 unfold :: Functor seq => (a -> MatterF pos neseq seq a) -> a -> Matter pos neseq seq
 unfold = F.unfold
 
-mapSequence :: (seq (SequencePart pos a) -> seq' (SequencePart pos a)) -> MatterF pos neseq seq a -> MatterF pos neseq seq' a
+mapSequence ::
+    (seq (SequencePart pos a) -> seq' (SequencePart pos a))
+ ->
+    MatterF pos neseq seq a
+ ->
+    MatterF pos neseq seq' a
 {-# INLINE mapSequence #-}
 mapSequence f = \case
     FlatF flt -> FlatF flt
@@ -174,7 +217,15 @@ mapSequence f = \case
     ParenF l x r -> ParenF l x r
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
 
-mapPositions :: (Functor seq, Functor neseq) => (pos -> pos') -> MatterF pos neseq seq a -> MatterF pos' neseq seq a
+mapPositions ::
+  forall pos pos' seq neseq a.
+        (Functor seq, Functor neseq)
+     =>
+        (pos -> pos')
+     ->
+        MatterF pos neseq seq a
+     ->
+        MatterF pos' neseq seq a
 {-# INLINE mapPositions #-}
 mapPositions f = \case
     FlatF flt -> FlatF (flat flt)
@@ -203,18 +254,20 @@ mapPositions f = \case
         JustExponent l r -> JustExponent (f l) (f r)
 
     text = \case
-        Suppressor p j txt -> Suppressor (f p) (joiner j) (text txt)
+        Suppressor p1 p2 j txt -> Suppressor (f p1) (f p2) (joiner j) (text txt)
         TextLiteral q l r more -> TextLiteral q (f l) (f r) (moreText more)
 
+    joiner :: Joiner pos neseq j -> Joiner pos' neseq j
     joiner = \case
-        NilJoiner l r -> NilJoiner (f l) (f r)
-        ConsJoiner l r escapes j -> ConsJoiner (f l) (f r) (fmap escape escapes) (joiner j)
+        NilJoiner p -> NilJoiner (f p)
+        ConsJoinerText l r j -> ConsJoinerText (f l) (f r) (joiner j)
+        ConsJoinerEscapes escapes j -> ConsJoinerEscapes (fmap escape escapes) (joiner j)
 
     escape (MkEscape p sz) = MkEscape (f p) sz
 
     moreText = \case
         NoMoreText -> NoMoreText
-        MoreText j txt -> MoreText (joiner j) (text txt)
+        MoreText p j txt -> MoreText (f p) (joiner j) (text txt)
 
     sequencePart = \case
         Item x -> Item x

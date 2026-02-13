@@ -1,5 +1,6 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MonoLocalBinds #-}
 
 module Language.Matter.SyntaxTree.Pretty (module Language.Matter.SyntaxTree.Pretty) where
 
@@ -9,7 +10,6 @@ import Data.DList.DNonEmpty (DNonEmpty)
 import Data.DList.DNonEmpty qualified as DNE
 import Language.Matter.SyntaxTree
 import Language.Matter.Tokenizer (OdToken (..), SdToken (..), Token (..))
-import Language.Matter.Tokenizer.Counting (Three (..))
 
 od :: OdToken -> DNonEmpty Token
 od = DNE.singleton . OdToken
@@ -78,17 +78,18 @@ prettyFlat = \case
 prettyMoreBytes :: MoreBytes pos -> DList Token
 prettyMoreBytes = \case
     NoMoreBytes -> mempty
-    MoreBytes _p _l _r more -> sd' (SdJoinerNotEscaped Three1) <> od' OdBytes <> prettyMoreBytes more
+    MoreBytes _p _l _r more -> od' OdOpenJoiner <> sd' SdCloseJoiner <> od' OdBytes <> prettyMoreBytes more
 
 prettyText :: Foldable neseq => Text pos neseq -> DNonEmpty Token
 prettyText = \case
-    Suppressor _l j txt -> sd SdUnderscore <> prettyJoiner True j <> prettyText txt
+    Suppressor _p _p' j txt -> sd SdUnderscore <> od OdOpenJoiner <> prettyJoiner j <> prettyText txt
     TextLiteral q _l _r more -> prettyQuote q `appendDList` prettyMoreText more
 
-prettyJoiner :: Foldable neseq => Bool -> Joiner pos neseq -> DNonEmpty Token
-prettyJoiner starts = \case
-    NilJoiner _l _r -> sd (SdJoinerNotEscaped Three2)   -- TODO could be Three1 as well :/
-    ConsJoiner _l _r escapes j -> od (OdJoinerNotEscaped starts) <> foldr ((<>) . prettyEscape) (prettyJoiner False j) escapes
+prettyJoiner :: Foldable neseq => Joiner pos neseq j -> DNonEmpty Token
+prettyJoiner = \case
+    NilJoiner _p -> sd SdCloseJoiner
+    ConsJoinerText _l _r j -> od OdJoinerText <> prettyJoiner j
+    ConsJoinerEscapes escapes j -> foldr (\e acc -> prettyEscape e <> acc) (prettyJoiner j) escapes
 
 prettyEscape :: Escape pos -> DNonEmpty Token
 prettyEscape (MkEscape _p sz) = sd (SdJoinerEscapedUtf8 sz)
@@ -101,4 +102,4 @@ prettyQuote = \case
 prettyMoreText :: Foldable neseq => MoreText pos neseq -> DList Token
 prettyMoreText = \case
     NoMoreText -> mempty
-    MoreText j txt -> toDList $ prettyJoiner True j <> prettyText txt
+    MoreText _p j txt -> toDList $ od OdOpenJoiner <> prettyJoiner j <> prettyText txt

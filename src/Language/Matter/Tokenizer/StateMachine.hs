@@ -148,8 +148,7 @@ data St =
     -- | The delimiter and the potential match so far
     MultiQuotedString3 !(MultiQuotePartialMatch D10)
   |
-    -- | Whether this includes the @<@
-    JoinerNotEscaped !Bool
+    JoinerNotEscaped
   |
     JoinerEscapedUtf8 !(Maybe' Utf8Size)
 
@@ -364,10 +363,9 @@ data OdToken =
   |
     OdOpenParen
   |
-    -- | Whether this token includes the @<@
-    --
-    -- Note that this token never includes the @>@.
-    OdJoinerNotEscaped !Bool
+    OdOpenJoiner
+  |
+    OdJoinerText
   |
     OdBytes
   |
@@ -427,7 +425,7 @@ eof start cur = \case
 
     LeftBraceSuccessor -> EofError EofNeedOrdering
 
-    LeftAngleSuccessor -> EofJust $ OdJoinerNotEscaped True
+    LeftAngleSuccessor -> EofJust OdOpenJoiner
 
     ZeroSuccessor -> EofJust OdIntegerPart
 
@@ -453,10 +451,10 @@ eof start cur = \case
 
     MultiQuotedString3 acc -> EofError $ EofMultiQuotedString3 acc
 
-    JoinerNotEscaped acc ->
+    JoinerNotEscaped ->
         if cur == start
         then EofNothing   -- no zero-length tokens!
-        else EofJust $ OdJoinerNotEscaped acc
+        else EofJust OdJoinerText
 
     JoinerEscapedUtf8 acc -> EofError $ EofJoinerEscapedUtf8 (valueUtf8Size <$> acc)
 
@@ -513,11 +511,6 @@ data SdToken =
     -- | The delimiter
     SdMultiQuotedString !(Four' D10)
   |
-    -- | 1 is <>, 2 is <...> and 3 is ...>
-    --
-    -- Note that this token always includes the @>@.
-    SdJoinerNotEscaped !Three
-  |
     -- | The number of bytes in the UTF8 encoding of the code point
     --
     -- TODO shoud this exclude the length, since 'Pos' carries that
@@ -526,6 +519,8 @@ data SdToken =
     -- TODO without a length argument, should adjacent escapes be
     -- combined into a single token?
     SdJoinerEscapedUtf8 !Four
+  |
+    SdCloseJoiner
   deriving (Eq, Show)
 
 data SnocError =
@@ -611,10 +606,10 @@ snoc start cur = \case
         _ -> SnocError SnocNeedOrdering
 
     LeftAngleSuccessor -> \case
-        '}' -> SnocSd (SdCloseMeta LT) Start
-        '%' -> SnocOd (OdJoinerNotEscaped True) $ JoinerEscapedUtf8 Nothing'
-        '>' -> SnocSd (SdJoinerNotEscaped Three1) Start
-        _ -> SnocEpsilon (JoinerNotEscaped True)
+        '}' -> SnocSd                (SdCloseMeta LT) Start
+        '%' -> SnocOd   OdOpenJoiner                  (JoinerEscapedUtf8 Nothing')
+        '>' -> SnocOdSd OdOpenJoiner SdCloseJoiner    Start
+        _   -> SnocOd   OdOpenJoiner                  JoinerNotEscaped
 
     EqualsSuccessor -> \case
         '}' -> SnocSd (SdCloseMeta EQ) Start
@@ -699,15 +694,20 @@ snoc start cur = \case
         _ -> SnocEpsilon $ MultiQuotedString2 $ forgetMultiQuotePartialMatch acc
 
     -- loop
-    JoinerNotEscaped acc -> \case
+    JoinerNotEscaped -> \case
         '%' ->
             let f
                   | cur == start = SnocEpsilon   -- no zero-length tokens!
-                  | otherwise    = SnocOd (OdJoinerNotEscaped acc)
+                  | otherwise    = SnocOd OdJoinerText
             in
             f $ JoinerEscapedUtf8 Nothing'
-        '>' -> SnocSd (SdJoinerNotEscaped (if acc then Three2 else Three3)) Start
-        _ -> SnocEpsilon (JoinerNotEscaped acc)
+        '>' ->
+            let f
+                  | cur == start = SnocSd   -- no zero-length tokens!
+                  | otherwise    = SnocOdSd OdJoinerText
+            in
+            f SdCloseJoiner Start
+        _ -> SnocEpsilon JoinerNotEscaped
 
     JoinerEscapedUtf8 acc -> (. parseD16) $ \case
         Nothing -> SnocError SnocNeedNibble
@@ -722,7 +722,7 @@ snoc start cur = \case
 
               -- | the last nibble is always unconstrained; recall start is the Percent sign
               | posDiff cur start == 2 * valueFour (valueUtf8Size size)
-             -> SnocSd (SdJoinerEscapedUtf8 (valueUtf8Size size)) $ JoinerNotEscaped False
+             -> SnocSd (SdJoinerEscapedUtf8 (valueUtf8Size size)) JoinerNotEscaped
 
               | odd (posDiff cur start)   -- Note that cur - start > 1 because acc is Just'
               , Five2 /= leadingBitCountPlus1 x
@@ -846,6 +846,6 @@ loops = \case
     ManyDigits _ -> Just setCharD10
     DoubleQuotedString -> Just $ setCharComplement1 '"'
     MultiQuotedString2 _ -> Just $ setCharComplement1 '\''
-    JoinerNotEscaped _ -> Just $ setCharComplement2 '%' '>'
+    JoinerNotEscaped -> Just $ setCharComplement2 '%' '>'
 
     _ -> Nothing

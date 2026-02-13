@@ -11,7 +11,7 @@ import Data.Vector qualified as V
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Builder qualified as TL
 import Language.Matter.Tokenizer
-import Language.Matter.Tokenizer.Counting (D10 (..), Four (..), Four' (..), Three (..))
+import Language.Matter.Tokenizer.Counting (D10 (..), Four (..), Four' (..))
 import System.Random.Stateful qualified as R
 
 pick :: (R.StatefulGen g m, ?g :: g) => TL.Builder -> [TL.Builder] -> Builder m
@@ -79,7 +79,8 @@ after = \case
         OdAtom -> Id
         OdVariant -> Id
         OdOpenParen -> Any
-        OdJoinerNotEscaped{} -> Any
+        OdOpenJoiner{} -> Any
+        OdJoinerText{} -> Any
         OdBytes -> Digit
         OdIntegerPart -> Digit
         OdFractionPart -> Digit
@@ -94,8 +95,8 @@ prettyToken g = let ?g = g in wrap $ \case
         OdAtom -> "@" <> pick "A" ["B", "C", "true", "False", "null", "NaN"]
         OdVariant -> "#" <> pick "X" ["Y", "Z", "red", "Blue", "NaN"]
         OdOpenParen -> "("
-        OdJoinerNotEscaped start ->
-            (if start then "<" else "") <> pick " " (["" | start] ++ ["join", "\t", ",", "<", "~<"])
+        OdOpenJoiner -> "<"
+        OdJoinerText -> pick " " ["join", "\t", ",", "<", "~<"]
         OdBytes -> "0x" <> pick "" ["00", "AB", "a1973b", "FEEB", "0103", "0000", "123456"]
         OdIntegerPart -> integerPart
         OdFractionPart -> "." <> pick "0" ["123", "100", "000", "00900"]
@@ -125,12 +126,7 @@ prettyToken g = let ?g = g in wrap $ \case
                 q = "'" <> delim <> "'"
             in
             q <> pick "" ["<>", "foo", "bar", "\n", "Hello there, Rabbit.", "Quoth the Raven \"Nevermore.\"", "a'a", "'salsa'"] <> q
-        SdJoinerNotEscaped acc ->
-            -- TODO we're letting Three2 be "<>" sometimes, which is
-            -- contrary to its stated semantics. But that's is
-            -- currently the only way that "Generator" would ever
-            -- yield a <> in a Text.
-            (if Three3 /= acc then "<" else "") <> (if Three1 == acc then "" else pick "" ["join", "\t", ",", "<", "~<"]) <> ">"
+        SdCloseJoiner -> ">"
         SdJoinerEscapedUtf8 four -> "%" <> case four of
             Four1 -> pick "46"       ["09", "0a", "25", "79"]
             Four2 -> pick "C398"     ["C2B1", "CF80", "d0af"]

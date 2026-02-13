@@ -168,74 +168,74 @@ testCases = [
         []
     (Snoc 0 SnocNeedStart)
   , MkTestCase "<%21>"
-        [1#OdJoinerNotEscaped True,3#SdJoinerEscapedUtf8 Four1,4#SdJoinerNotEscaped Three3]
+        [1#OdOpenJoiner,3#SdJoinerEscapedUtf8 Four1,4#SdCloseJoiner]
         Done
   , MkTestCase "<%C2A9>"
-        [1#OdJoinerNotEscaped True,5#SdJoinerEscapedUtf8 Four2,6#SdJoinerNotEscaped Three3]
+        [1#OdOpenJoiner,5#SdJoinerEscapedUtf8 Four2,6#SdCloseJoiner]
         Done
   , MkTestCase "<%E282AC>"
-        [1#OdJoinerNotEscaped True,7#SdJoinerEscapedUtf8 Four3,8#SdJoinerNotEscaped Three3]
+        [1#OdOpenJoiner,7#SdJoinerEscapedUtf8 Four3,8#SdCloseJoiner]
         Done
   , MkTestCase "<%F09F988A>"
-        [1#OdJoinerNotEscaped True,9#SdJoinerEscapedUtf8 Four4,10#SdJoinerNotEscaped Three3]
+        [1#OdOpenJoiner,9#SdJoinerEscapedUtf8 Four4,10#SdCloseJoiner]
         Done
   , MkTestCase "<%21ABOUT>"
         -- Looks wrong, but it's just a plain string ABOUT after the escape.
-        [1#OdJoinerNotEscaped True,3#SdJoinerEscapedUtf8 Four1,9#SdJoinerNotEscaped Three3]
+        [1#OdOpenJoiner,3#SdJoinerEscapedUtf8 Four1,9#OdJoinerText, 9#SdCloseJoiner]
         Done
   , MkTestCase "<%21"
         -- Caught a bug where we were emitting a zero-length OdJoinerNotEscaped False
-        [1#OdJoinerNotEscaped True,3#SdJoinerEscapedUtf8 Four1]
+        [1#OdOpenJoiner,3#SdJoinerEscapedUtf8 Four1]
         Done
   , MkTestCase "<%F0288c28"
-        [1#OdJoinerNotEscaped True]
+        [1#OdOpenJoiner]
         (Snoc 4 SnocBadUtf8NibbleN)
   , MkTestCase "<%F48FBFBF"
         -- This is the UTF8 encoding of U+10FFFF, the greatest valid code point.
-        [1#OdJoinerNotEscaped True,9#SdJoinerEscapedUtf8 Four4]
+        [1#OdOpenJoiner,9#SdJoinerEscapedUtf8 Four4]
         Done
   , MkTestCase "<%F49FBFBF"
         -- This should be rejected, since it's > U+10FFFF
-        [1#OdJoinerNotEscaped True]
+        [1#OdOpenJoiner]
         (Snoc 4 SnocUtf8TooGreat)
   , MkTestCase "<%F39FBFBF"
         -- But this is fine, since 3 < 4.
-        [1#OdJoinerNotEscaped True,9#SdJoinerEscapedUtf8 Four4]
+        [1#OdOpenJoiner,9#SdJoinerEscapedUtf8 Four4]
         Done
   , MkTestCase "<%F4AFBFBF"
         -- This should be rejected, since it's > U+10FFFF
-        [1#OdJoinerNotEscaped True]
+        [1#OdOpenJoiner]
         (Snoc 4 SnocUtf8TooGreat)
   , MkTestCase "<%F4BFBFBF"
         -- This should be rejected, since it's > U+10FFFF
-        [1#OdJoinerNotEscaped True]
+        [1#OdOpenJoiner]
         (Snoc 4 SnocUtf8TooGreat)
   , MkTestCase "<%F4CFBFBF"
         -- This should be rejected not because it's > U+10FFFF but
         -- rather because it violates the lower-level UTF8 schema.
-        [1#OdJoinerNotEscaped True]
+        [1#OdOpenJoiner]
         (Snoc 4 SnocBadUtf8NibbleN)
   , MkTestCase "<\\n>"
         -- Backslash escapes are something the user might want to use as a joiner
-        [3#SdJoinerNotEscaped Three2]
+        [1#OdOpenJoiner, 3#OdJoinerText, 3#SdCloseJoiner]
         Done
   , MkTestCase "<\n>"
         -- Literal newline is allowed
-        [2#SdJoinerNotEscaped Three2]
+        [1#OdOpenJoiner, 2#OdJoinerText, 2#SdCloseJoiner]
         Done
   , MkTestCase "\n<>"
         -- Or can be avoided via joiners
-        [1#OdWhitespace,2#SdJoinerNotEscaped Three1]
+        [1#OdWhitespace,2#OdOpenJoiner, 2#SdCloseJoiner]
         Done
   , MkTestCase "<,>"
-        [2#SdJoinerNotEscaped Three2]
+        [1#OdOpenJoiner, 2#OdJoinerText, 2#SdCloseJoiner]
         Done
   , MkTestCase "<dangling"
         -- parser will reject this, but the tokenizer shouldn't.
         --
         -- For example, a syntax highlighter could benefit from this
         -- tokenization.
-        [9#OdJoinerNotEscaped True]
+        [1#OdOpenJoiner, 9#OdJoinerText]
         Done
   , MkTestCase "[@NaN 0]"
         [0#SdOpenSeq, 5#OdAtom, 6#OdWhitespace, 7#OdIntegerPart, 7#SdCloseSeq]
@@ -244,10 +244,10 @@ testCases = [
         [2#OdVariant, 3#OdWhitespace, 15#SdMultiQuotedString (Four1' D10_7)]
         Done
   , MkTestCase "<%d0af"
-        [1#OdJoinerNotEscaped True, 5#SdJoinerEscapedUtf8 Four2]
+        [1#OdOpenJoiner, 5#SdJoinerEscapedUtf8 Four2]
         Done
   , MkTestCase "<%25%25"
-        [1#OdJoinerNotEscaped True, 3#SdJoinerEscapedUtf8 Four1, 6#SdJoinerEscapedUtf8 Four1]
+        [1#OdOpenJoiner, 3#SdJoinerEscapedUtf8 Four1, 6#SdJoinerEscapedUtf8 Four1]
         Done
   ]
 
