@@ -46,7 +46,10 @@ module Language.Matter.Tokenizer.StateMachine (
   ) where
 
 import Data.Text qualified as T
+import Data.Text.Internal qualified as TI
+import Data.Text.Internal.Encoding.Utf8 qualified as TI (utf8Length)
 import Data.Text.Lazy qualified as TL
+import Data.Text.Internal.Lazy qualified as TLI
 import Data.Word (Word32)
 import Language.Matter.Tokenizer.Counting
 import Language.Matter.Tokenizer.SetChar
@@ -200,15 +203,24 @@ deriving instance Eq a => Eq (MultiQuotePartialMatch a)
 -----
 
 -- | An index into the input stream
---
--- In a UTF8 file, eg, this counts code points, not bytes.
-newtype Pos = MkPos Word32
+data Pos = MkPos { codePoints, utf8Bytes :: !Word32 }
   deriving (Eq)
 
-instance Show Pos where show (MkPos x) = 'P' : show x
+instance Monoid Pos where mempty = MkPos 0 0
+instance Semigroup Pos where MkPos a b <> MkPos x y = MkPos (a + x) (b + y)
+
+instance Show Pos where show x = 'P' : show (codePoints x)
+
+charPos :: Char -> Pos
+{-# INLINE charPos #-}
+charPos c = MkPos {
+    codePoints = 1
+  ,
+    utf8Bytes = fromIntegral $ TI.utf8Length c
+  }
 
 posDiff :: Pos -> Pos -> Word32
-posDiff (MkPos x) (MkPos y) = x - y
+posDiff x y = codePoints x - codePoints y
 
 data Token =
     OdToken !OdToken
@@ -231,12 +243,12 @@ tokenizerCurrent (MkTokenizer _start cur _st) = cur
 
 -- | The freshly initialized tokenizer
 startTokenizer :: Tokenizer
-startTokenizer = MkTokenizer (MkPos 0) (MkPos 0) Start
+startTokenizer = MkTokenizer mempty mempty Start
 
 data UnconsResult inp = UnconsNothing | UnconsJust !Char !inp
 
 -- | Result along with how many were dropped
-data MunchResult inp = MkMunchResult !Word32 !inp
+data MunchResult inp = MkMunchResult !Pos !inp
 
 -- | An input stream that can be segmented into Matter tokens
 class MatterStream inp where
@@ -251,13 +263,13 @@ class MatterStream inp where
 -- character.
 defaultSlowMunch :: MatterStream inp => SetChar -> inp -> MunchResult inp
 defaultSlowMunch sc =
-    go 0
+    go mempty
   where
     go !acc inp = case uncons inp of
         UnconsNothing ->
             MkMunchResult acc inp
         UnconsJust c inp' ->
-            if memberSetChar c sc then go (acc + 1) inp' else
+            if memberSetChar c sc then go (acc <> charPos c) inp' else
             MkMunchResult acc inp
 
 instance (a ~ Char) => MatterStream [a] where
@@ -270,19 +282,31 @@ instance MatterStream T.Text where
     uncons = maybe UnconsNothing (uncurry UnconsJust) . T.uncons
     munch sc txt =
         MkMunchResult
-            (fromIntegral (T.length txt - T.length txt'))
+            MkPos{codePoints = fromIntegral n, utf8Bytes = fromIntegral b}
             txt'
       where
         txt' = T.dropWhile (flip memberSetChar sc) txt
 
+        n = T.length txt - T.length txt'
+        b =
+            let TI.Text _arr1 off1 _len1 = txt
+                TI.Text _arr2 off2 _len2 = txt'
+            in
+            off2 - off1
+
 instance MatterStream TL.Text where
     uncons = maybe UnconsNothing (uncurry UnconsJust) . TL.uncons
-    munch sc txt =
-        MkMunchResult
-            (fromIntegral (TL.length txt - TL.length txt'))
-            txt'
+    munch sc =
+        \txt -> go mempty txt
       where
-        txt' = TL.dropWhile (flip memberSetChar sc) txt
+        go !pos = \case
+            TLI.Empty -> MkMunchResult pos TLI.Empty
+            TLI.Chunk txt chunks ->
+                let MkMunchResult pos' txt' = munch sc txt
+                    pos'' = pos <> pos'
+                in
+                if T.null txt' then go pos'' chunks else
+                MkMunchResult pos'' $ TLI.Chunk txt' chunks
 
 data SnocsResult =
     -- | A token, the position of its first character, and either the
@@ -302,26 +326,26 @@ data SnocsResult =
 
 snocsTokenizer :: MatterStream inp => Tokenizer -> inp -> SnocsResult
 snocsTokenizer =
-    \(MkTokenizer (MkPos start) (MkPos cur) st) -> go start cur st
+    \(MkTokenizer start cur st) -> go start cur st
   where
     go !start !cur !st = (. uncons) $ \case
         UnconsNothing ->
-            SnocsDone $ MkTokenizer (MkPos start) (MkPos cur) st
-        UnconsJust c s -> case snoc (MkPos start) (MkPos cur) st c of
+            SnocsDone $ MkTokenizer start cur st
+        UnconsJust c s -> case snoc start cur st c of
             SnocEpsilon st' ->
-                go' start     (cur + 1) st' s
+                go' start     (cur <> charPos c) st' s
             SnocOd tk st' ->
-                SnocsToken (MkPos start) (OdToken tk) (MkPos cur)
-              $ go'  cur      (cur + 1) st' s
+                SnocsToken start (OdToken tk) cur
+              $ go'  cur      (cur <> charPos c) st' s
             SnocSd tk st' ->
-                SnocsToken (MkPos start) (SdToken tk) (MkPos cur)
-              $ go' (cur + 1) (cur + 1) st' s
+                SnocsToken start (SdToken tk) cur
+              $ go' (cur <> charPos c) (cur <> charPos c) st' s
             SnocOdSd tk1 tk2 st' ->
-                SnocsToken (MkPos start) (OdToken tk1) (MkPos cur)
-              $ SnocsToken (MkPos cur) (SdToken tk2) (MkPos cur)
-              $ go' (cur + 1) (cur + 1) st' s
+                SnocsToken start (OdToken tk1) cur
+              $ SnocsToken cur   (SdToken tk2) cur
+              $ go' (cur <> charPos c) (cur <> charPos c) st' s
             SnocError err ->
-                SnocsError (MkPos start) (MkPos cur) err
+                SnocsError start cur err
 
     go' start cur st s = case loops st of
         Nothing ->
@@ -329,7 +353,7 @@ snocsTokenizer =
         Just sc ->
             let MkMunchResult n s' = munch sc s
             in
-            go start (cur + n) st s'
+            go start (cur <> n) st s'
 
 {-# SPECIALIZE snocsTokenizer :: Tokenizer -> String  -> SnocsResult #-}
 {-# SPECIALIZE snocsTokenizer :: Tokenizer -> T.Text  -> SnocsResult #-}

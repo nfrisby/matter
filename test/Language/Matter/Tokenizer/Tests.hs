@@ -328,9 +328,9 @@ doesItPass = \(MkTestCase s tks o) -> do
   where
 
     go acc (Tk cur tk : tks) o (SnocsToken start' tk' cur' rest)
-      | MkPos acc == start'
+      | acc == codePoints start'
       , tk == tk'
-      , MkPos cur == cur'
+      , cur == codePoints cur'
       = let next = case tk of
                 OdToken{} -> cur
                 SdToken{} -> cur + 1
@@ -346,8 +346,8 @@ doesItPass = \(MkTestCase s tks o) -> do
         EofNothing -> Just $ Tk_EofNothing acc tk cur (tokenizerStart x) (tokenizerCurrent x)
         EofError err' -> Just $ Tk_EofError acc tk cur (tokenizerStart x) (tokenizerCurrent x) err'
         EofJust tk'
-          | MkPos acc == tokenizerStart x
-          , MkPos cur == tokenizerCurrent x
+          | acc == codePoints (tokenizerStart x)
+          , cur == codePoints (tokenizerCurrent x)
           , tk == OdToken tk'
          -> Nothing
           | otherwise
@@ -358,8 +358,8 @@ doesItPass = \(MkTestCase s tks o) -> do
 
     go acc [] (Snoc cur err) (SnocsError start' cur' err')
 
-      | MkPos acc == start'
-      , MkPos cur == cur'
+      | acc == codePoints start'
+      , cur == codePoints cur'
       , err == err'
       = Nothing
 
@@ -381,8 +381,8 @@ doesItPass = \(MkTestCase s tks o) -> do
         EofNothing -> Just $ EofError_EofNothing acc cur err (tokenizerStart x) (tokenizerCurrent x)
         EofJust tk' -> Just $ EofError_EofJust acc cur err (tokenizerStart x) tk' (tokenizerCurrent x)
         EofError err'
-          | MkPos acc == tokenizerStart x
-          , MkPos cur == tokenizerCurrent x
+          | acc == codePoints (tokenizerStart x)
+          , cur == codePoints (tokenizerCurrent x)
           , err == err'
          -> Nothing
           | otherwise

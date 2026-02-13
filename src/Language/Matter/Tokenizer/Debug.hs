@@ -25,17 +25,19 @@ tokenizeWholeString =
     next acc1 start cur st =
         jump (A start (cur + 1) st : acc1) start (cur + 1) st
 
+    mkPos n = MkPos { codePoints = n, utf8Bytes = 0 }
+
     jump acc1 start cur st s = case loops st of
-        Nothing -> go acc1 (MkTokenizer (MkPos start) (MkPos cur) st) s
+        Nothing -> go acc1 (MkTokenizer (mkPos start) (mkPos cur) st) s
         Just sc ->
             let MkMunchResult n s' = munch sc s
             in
             go
-                (if 0 == n then acc1 else A start (cur + n) st : acc1)
-                (MkTokenizer (MkPos start) (MkPos (cur + n)) st)
+                (if 0 == codePoints n then acc1 else A start (cur + codePoints n) st : acc1)
+                (MkTokenizer (mkPos start) (mkPos (cur + codePoints n)) st)
                 s'
 
-    go !acc1 !x@(MkTokenizer (MkPos start) (MkPos cur) _st) = \case
+    go !acc1 !x@(MkTokenizer startPos curPos _st) = \case
         [] -> (reverse acc1, Right $ eofTokenizer x)
         c:s -> case snocTokenizer x c of
             SnocEpsilon st' ->
@@ -48,6 +50,9 @@ tokenizeWholeString =
                 next (C cur tk2 (cur + 1) : B start tk1 cur : acc1) (cur + 1) cur st' s
             SnocError err ->
                 (reverse acc1, Left err)
+      where
+        start = codePoints startPos
+        cur   = codePoints curPos
 
 run :: [String] -> IO ()
 run ss = do
