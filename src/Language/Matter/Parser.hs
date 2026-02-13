@@ -435,7 +435,7 @@ popJt2 acc j (Escape p size fstk) = case (escapeFollowsOf fstk, fstk) of
     (EscapeFollowsJt2, fstk') -> popJt2 (ST.MkEscape p size : acc) j fstk'
 
     (EscapeFollowsJt1, OdJoiner l r fstk') ->
-        popJoinerFollows (ST.ConsJoiner l r (NE.reverse (ST.MkEscape p size NE.:| acc)) j) fstk'
+        popJoinerFollows (ST.ConsJoiner l r (ST.MkEscape p size NE.:| acc) j) fstk'
 
 popBytes :: ST.MoreBytes Pos -> Flat B -> ST.Flat Pos NonEmpty
 popBytes acc = \case

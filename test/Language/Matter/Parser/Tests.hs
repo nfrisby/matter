@@ -122,6 +122,14 @@ testCases = [
       $ TextLiteral DoubleQuote MkP MkP
       $ NoMoreText
 
+  , passing "_<%25%C398>\"\""
+
+  , MkRoundTrip 0 $ Flat $ Text
+      $ Suppressor MkP
+          (ConsJoiner MkP MkP (MkEscape MkP Four2 NE.:| [MkEscape MkP Four1]) (NilJoiner MkP MkP))
+      $ TextLiteral DoubleQuote MkP MkP
+      $ NoMoreText
+
   ]
 
 data TestCase =
