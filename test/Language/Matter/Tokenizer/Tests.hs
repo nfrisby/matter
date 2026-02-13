@@ -246,6 +246,9 @@ testCases = [
   , MkTestCase "<%d0af"
         [1#OdJoinerNotEscaped True, 5#SdJoinerEscapedUtf8 Four2]
         Done
+  , MkTestCase "<%25%25"
+        [1#OdJoinerNotEscaped True, 3#SdJoinerEscapedUtf8 Four1, 6#SdJoinerEscapedUtf8 Four1]
+        Done
   ]
 
 -----

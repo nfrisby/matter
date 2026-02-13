@@ -112,6 +112,13 @@ testCases = [
   , passing "[@NaN 0]"
 
   , passing "_<%d0af>'0''0'"
+
+  , MkRoundTrip 0 $ Flat $ Text
+      $ Suppressor MkP
+            (ConsJoiner MkP MkP (MkEscape MkP Four1 NE.:| [MkEscape MkP Four1]) $ NilJoiner MkP MkP)
+      $ TextLiteral DoubleQuote MkP MkP
+      $ NoMoreText
+
   ]
 
 data TestCase = MkTestCase String Bool

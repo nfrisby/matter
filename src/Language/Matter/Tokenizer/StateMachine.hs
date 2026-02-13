@@ -700,7 +700,12 @@ snoc start cur = \case
 
     -- loop
     JoinerNotEscaped acc -> \case
-        '%' -> SnocOd (OdJoinerNotEscaped acc) (JoinerEscapedUtf8 Nothing')
+        '%' ->
+            let f
+                  | cur == start = SnocEpsilon   -- no zero-length tokens!
+                  | otherwise    = SnocOd (OdJoinerNotEscaped acc)
+            in
+            f $ JoinerEscapedUtf8 Nothing'
         '>' -> SnocSd (SdJoinerNotEscaped (if acc then Three2 else Three3)) Start
         _ -> SnocEpsilon (JoinerNotEscaped acc)
 
