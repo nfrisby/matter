@@ -44,9 +44,9 @@ data FLAT =
 class SingI a where singI :: a
 
 data JoinerFollows :: FLAT -> Type where
-  JoinerFollowsU   :: JoinerFollows U
-  JoinerFollowsT   :: JoinerFollows T
-  JoinerFollowsJt2 :: JoinerFollows Jt2
+    JoinerFollowsU   :: JoinerFollows U
+    JoinerFollowsT   :: JoinerFollows T
+    JoinerFollowsJt2 :: JoinerFollows Jt2
 
 instance SingI (JoinerFollows U)   where singI = JoinerFollowsU
 instance SingI (JoinerFollows T)   where singI = JoinerFollowsT
@@ -56,8 +56,8 @@ joinerFollowsOf :: SingI (JoinerFollows x) => Flat x -> JoinerFollows x
 joinerFollowsOf _fstk = singI
 
 data EscapeFollows :: FLAT -> Type where
-  EscapeFollowsJt1 :: EscapeFollows Jt1
-  EscapeFollowsJt2 :: EscapeFollows Jt2
+    EscapeFollowsJt1 :: EscapeFollows Jt1
+    EscapeFollowsJt2 :: EscapeFollows Jt2
 
 instance SingI (EscapeFollows Jt1) where singI = EscapeFollowsJt1
 instance SingI (EscapeFollows Jt2) where singI = EscapeFollowsJt2
