@@ -243,6 +243,9 @@ testCases = [
   , MkTestCase "#Z '7''salsa''7'"
         [2#OdVariant, 3#OdWhitespace, 15#SdMultiQuotedString (Four1' D10_7)]
         Done
+  , MkTestCase "<%d0af"
+        [1#OdJoinerNotEscaped True, 5#SdJoinerEscapedUtf8 Four2]
+        Done
   ]
 
 -----

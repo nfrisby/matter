@@ -111,6 +111,7 @@ testCases = [
 
   , passing "[@NaN 0]"
 
+  , passing "_<%d0af>'0''0'"
   ]
 
 data TestCase = MkTestCase String Bool

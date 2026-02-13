@@ -203,8 +203,11 @@ parseD16 = \case
 -----
 
 -- | Does this nibble have 0, 1, 2, 3, or 4 leading 1s in binary notation?
+--
+-- Cf <https://en.wikipedia.org/wiki/UTF-8#Description>
 leadingBitCountPlus1 :: D16 -> Five
 leadingBitCountPlus1 = \case
+    -- 0xxx
     D16_0 -> Five1
     D16_1 -> Five1
     D16_2 -> Five1
@@ -213,11 +216,19 @@ leadingBitCountPlus1 = \case
     D16_5 -> Five1
     D16_6 -> Five1
     D16_7 -> Five1
-    D16_8 -> Five2   -- 8 is the smallest digit with a leading 1 in binary
+
+    -- 10xx
+    D16_8 -> Five2
     D16_9 -> Five2
     D16_A -> Five2
     D16_B -> Five2
-    D16_C -> Five3   -- 12 is the smallest digit with a leading 11 in binary
-    D16_D -> Five4
-    D16_E -> Five4   -- 14 is the smallest digit with a leading 111 in binary
-    D16_F -> Five5   -- 15 is the only digit with a leading 1111 in binary
+
+    -- 110x
+    D16_C -> Five3
+    D16_D -> Five3
+
+    -- 1110
+    D16_E -> Five4
+
+    -- 1111
+    D16_F -> Five5
