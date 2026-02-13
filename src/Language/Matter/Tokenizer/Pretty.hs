@@ -131,11 +131,11 @@ prettyToken g = let ?g = g in wrap $ \case
             -- currently the only way that "Generator" would ever
             -- yield a <> in a Text.
             (if Three3 /= acc then "<" else "") <> (if Three1 == acc then "" else pick "" ["join", "\t", ","]) <> ">"
-        SdJoinerEscapedUtf8 four -> case four of
-            Four1 -> pick "%46" ["%09", "%0a", "%25", "%9C"]
-            Four2 -> pick "%C398" ["%C2B1", "%CF80", "%d0af"]
-            Four3 -> pick "%E299bf" ["%E29a80", "%E2998B", "%E2A88C", "%E0B8BF", "%EFb4bF"]
-            Four4 -> pick "%F09F8084" ["%F09f82a1", "%F09F8E83", "%F09FA4AA"]
+        SdJoinerEscapedUtf8 four -> "%" <> case four of
+            Four1 -> pick "46"       ["09", "0a", "25", "79"]
+            Four2 -> pick "C398"     ["C2B1", "CF80", "d0af"]
+            Four3 -> pick "E299bf"   ["E29a80", "E2998B", "E2A88C", "E0B8BF", "EFb4bF"]
+            Four4 -> pick "F09F8084" ["F09f82a1", "F09F8E83", "F09FA4AA"]
 
 integerPart :: (R.StatefulGen g m, ?g :: g) => Builder m
 integerPart = pick "" ["+", "-"] <> pick "0" ["123", "100", "000", "00900"]
