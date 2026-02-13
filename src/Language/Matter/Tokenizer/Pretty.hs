@@ -124,7 +124,7 @@ prettyToken g = let ?g = g in wrap $ \case
                     Four4' d1 d2 d3 d4 -> digit d1 <> digit d2 <> digit d3 <> digit d4
                 q = "'" <> delim <> "'"
             in
-            q <> pick "" ["foo", "bar", "\n", "Hello there, Rabbit.", "Quoth the Raven \"Nevermore.\"", "a'a"] <> q
+            q <> pick "" ["foo", "bar", "\n", "Hello there, Rabbit.", "Quoth the Raven \"Nevermore.\"", "a'a", "'salsa'"] <> q
         SdJoinerNotEscaped acc ->
             -- TODO we're letting Three2 be "<>" sometimes, which is
             -- contrary to its stated semantics. But that's is

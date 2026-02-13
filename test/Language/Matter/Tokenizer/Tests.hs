@@ -240,6 +240,9 @@ testCases = [
   , MkTestCase "[@NaN 0]"
         [0#SdOpenSeq, 5#OdAtom, 6#OdWhitespace, 7#OdIntegerPart, 7#SdCloseSeq]
         Done
+  , MkTestCase "#Z '7''salsa''7'"
+        [2#OdVariant, 3#OdWhitespace, 15#SdMultiQuotedString (Four1' D10_7)]
+        Done
   ]
 
 -----

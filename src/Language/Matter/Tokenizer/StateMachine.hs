@@ -690,9 +690,9 @@ snoc start cur = \case
         _ -> SnocEpsilon $ MultiQuotedString2 delim
 
     MultiQuotedString3 acc -> \case
-        '\''
-          | MatchedAll delim <- acc
-         -> SnocSd (SdMultiQuotedString delim) Start
+        '\'' -> case acc of
+            MatchedAll delim -> SnocSd (SdMultiQuotedString delim) Start
+            _ -> SnocEpsilon $ MultiQuotedString3 $ MatchedNone $ forgetMultiQuotePartialMatch acc   -- TODO loop until /= '?
         c | Just x <- parseD10 c
           , Just acc' <- pushMultiQuotePartialMatch x acc
          -> SnocEpsilon $ MultiQuotedString3 acc'
