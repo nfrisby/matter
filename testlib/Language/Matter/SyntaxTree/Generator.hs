@@ -3,9 +3,11 @@
 
 module Language.Matter.SyntaxTree.Generator (module Language.Matter.SyntaxTree.Generator) where
 
+import Data.Functor ((<&>))
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
 import Language.Matter.SyntaxTree
+import Language.Matter.Tokenizer.Counting (D10 (..), Four (..), Four' (..))
 import System.Random.SplitMix (mkSMGen)
 import Math.Combinat.Partitions.Integer qualified as Combinat
 import Test.QuickCheck (shrinkList)
@@ -43,9 +45,8 @@ generateMatter =
           $ ([ (20, Flat <$> generateNumber   ) | sz < 4 ] ++)
           $ ([ (20, Flat <$> generateAtom     ) | sz < 2 ] ++)
 
+          $ ([ (10, Flat <$> generateText     ) | sz < 10 ] ++)
           $ ([ ( 3, Flat <$> generateBytes    ) | sz < 10 ] ++)
-
-          -- TODO generateText :grimace:
 
           $ ([ (10,          generateVariant  ) | 2 < sz ] ++)
           $ ([ ( 1,          generateParen    ) | 2 < sz ] ++)
@@ -85,6 +86,68 @@ generateBytes :: QC.Gen (Flat P NonEmpty)
 generateBytes =
     QC.sized $ \sz ->
         pure $ Bytes MkP MkP $ foldr ($) NoMoreBytes $ replicate (max 1 sz - 1) $ MoreBytes MkP MkP MkP
+
+generateText :: QC.Gen (Flat P NonEmpty)
+generateText = Text <$> generateText'
+
+generateText' :: QC.Gen (Text P NonEmpty)
+generateText' =
+    text
+  where
+    text =
+        QC.sized $ \sz ->
+            if sz < 2 then lit NoMoreText else
+            frequency
+              $  ((1, QC.resize (max 1 sz - 1) joinerText >>= \(j, txt) -> lit (MoreText j txt))            NE.:|)
+              $ ([(1, QC.resize (      sz - 1) joinerText <&> \(j, txt) -> Suppressor MkP j txt) | sz <= 3] ++)
+              $ []
+
+    lit more =
+        generateQuote <&> \q -> TextLiteral q MkP MkP more
+
+    joinerText =
+        QC.sized $ \sz ->
+            if sz < 2 then lit NoMoreText <&> \txt -> (NilJoiner MkP MkP, txt) else do
+                l <-
+                    frequency
+                      $  ((90,                         pure 1  )            NE.:|)
+                      $ ([( 9, QC.choose ( 2, min (sz - 1)  3) ) |  2 < sz] ++)
+                      $ ([( 1, QC.choose (10, min (sz - 1) 20) ) | 10 < sz] ++)
+                      $ []
+                let r = sz - l
+                (,) <$> QC.resize l joiner <*> QC.resize r text
+
+    joiner =
+        QC.sized $ \sz ->
+            if sz < 2 then pure (NilJoiner MkP MkP) else do
+                l <-
+                    frequency
+                      $  ((90,                        pure 1  )           NE.:|)
+                      $ ([( 9,                        pure 2  ) | 2 < sz] ++)
+                      $ ([( 1, QC.choose (5, min (sz - 1) 10) ) | 5 < sz] ++)
+                      $ []
+                let r = sz - l
+                ConsJoiner MkP MkP <$> QC.resize l escapes <*> QC.resize r joiner
+
+    escapes =
+        QC.sized $ \sz ->
+            (NE.:|) <$> escape <*> QC.vectorOf (max 1 sz - 1) escape
+
+    escape = MkEscape MkP <$> generateFour
+
+generateQuote :: QC.Gen Quote
+generateQuote =
+    frequency $ (9, pure DoubleQuote) NE.:| [(1, MultiQuote <$> generateFour'D10)]
+
+generateFour :: QC.Gen Four
+generateFour =
+    oneof $ fmap pure $ Four1 NE.:| [Four2, Four3, Four4]
+
+generateFour'D10 :: QC.Gen (Four' D10)
+generateFour'D10 =
+    oneof $ (Four1' <$> d10) NE.:| [Four2' <$> d10 <*> d10, Four3' <$> d10 <*> d10 <*> d10, Four4' <$> d10 <*> d10 <*> d10 <*> d10]
+  where
+    d10 = oneof $ fmap pure $ D10_0 NE.:| [D10_1,D10_2,D10_3,D10_4,D10_5,D10_6,D10_7,D10_8,D10_9]
 
 generateVariant :: QC.Gen (Matter P NonEmpty [])
 generateVariant =
