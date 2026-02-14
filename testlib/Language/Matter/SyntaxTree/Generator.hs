@@ -14,6 +14,8 @@ module Language.Matter.SyntaxTree.Generator (
 import Data.Functor ((<&>))
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
+import Data.Vector (Vector)
+import Data.Vector qualified as V
 import Language.Matter.SyntaxTree
 import Language.Matter.Tokenizer.Counting (D10 (..), Four (..), Four' (..), MaybeSign (..), Sign (..))
 import System.Random.SplitMix (mkSMGen)
@@ -55,10 +57,10 @@ sizeParts sz = do
 -----
 
 -- | Generates a 'Matter' that strictly respects 'QC.sized'
-generateMatter :: QC.Gen (Matter A P NonEmpty [])
+generateMatter :: QC.Gen (Matter A P NonEmpty Vector)
 generateMatter =
     QC.sized $ \sz ->
-        if sz < 1 then pure (Sequence MkSequenceA MkP [] MkP) else   -- the smallest visual /obvious/ option
+        if sz < 1 then pure (Sequence MkSequenceA MkP V.empty MkP) else   -- the smallest visual /obvious/ option
         frequency $
             (  ( 5,          generateSequence )            NE.:|)
 
@@ -74,14 +76,14 @@ generateMatter =
           $ ([ ( 1,          generatePinMetaLT) | 3 < sz ] ++)
           $ []
 
-generateSequence :: QC.Gen (Matter A P NonEmpty [])
+generateSequence :: QC.Gen (Matter A P NonEmpty Vector)
 generateSequence =
     QC.sized $ \sz -> do
         szs <- sizeParts $ max 1 sz - 1
-        xs <- mapM (flip QC.resize generateSequencePart) szs
+        xs <- traverse (flip QC.resize generateSequencePart) $ V.fromList szs
         pure $ Sequence MkSequenceA MkP xs MkP
 
-generateSequencePart :: QC.Gen (SequencePart P (Matter A P NonEmpty []))
+generateSequencePart :: QC.Gen (SequencePart P (Matter A P NonEmpty Vector))
 generateSequencePart =
     QC.sized $ \sz ->
         frequency $
@@ -182,7 +184,7 @@ generateFour'D10 =
   where
     d10 = oneof $ fmap pure $ D10_0 NE.:| [D10_1,D10_2,D10_3,D10_4,D10_5,D10_6,D10_7,D10_8,D10_9]
 
-generateVariant :: QC.Gen (Matter A P NonEmpty [])
+generateVariant :: QC.Gen (Matter A P NonEmpty Vector)
 generateVariant =
     QC.sized $ \sz -> do
         n <- frequency $
@@ -194,13 +196,13 @@ generateVariant =
         x <- QC.resize (max n sz - n) generateMatter
         pure $ foldr ($) x $ replicate n $ Variant MkP MkP
 
-generateParen :: QC.Gen (Matter A P NonEmpty [])
+generateParen :: QC.Gen (Matter A P NonEmpty Vector)
 generateParen =
     QC.sized $ \sz -> do
         x <- QC.resize (max 1 sz - 1) generateMatter
         pure $ Paren MkP x MkP
 
-generateMetaGT :: QC.Gen (Matter A P NonEmpty [])
+generateMetaGT :: QC.Gen (Matter A P NonEmpty Vector)
 generateMetaGT =
     QC.sized $ \sz -> do
         (l, r) <- sizeHalves $ max 1 sz - 1
@@ -216,7 +218,7 @@ generateMetaGT =
           $ []
         pure $ MetaGT MkP x MkP y
 
-generatePinMetaLT :: QC.Gen (Matter A P NonEmpty [])
+generatePinMetaLT :: QC.Gen (Matter A P NonEmpty Vector)
 generatePinMetaLT =
     QC.sized $ \sz -> do
         (l, r) <- sizeHalves $ max 2 sz - 2
@@ -227,12 +229,15 @@ generatePinMetaLT =
 -----
 
 -- | TODO very incomplete
-shrinkMatter :: Matter A pos neseq [] -> [Matter A pos neseq []]
+shrinkMatter :: Matter A pos neseq Vector -> [Matter A pos neseq Vector]
 shrinkMatter = \case
     Flat flt -> map Flat $ flat flt
     Variant l r x -> x  : [Variant l r x' | x' <- shrinkMatter x]
     Sequence _anno l xs r ->
-        (case xs of [Item x] -> (x :); [MetaEQ _l x _r] -> (x :); _ -> id) $ [ Sequence MkSequenceA l xs' r | xs' <- shrinkList sequencePart xs ]
+        (case V.toList xs of [Item x] -> (x :); [MetaEQ _l x _r] -> (x :); _ -> id)
+      $ [ Sequence MkSequenceA l (V.fromList xs') r
+        | xs' <- shrinkList sequencePart (V.toList xs)
+        ]
     MetaGT _l x _r y -> x : case y of
         NoClosePin y1 -> [y1]
         OnlyClosePin _l1 y1 _r1 -> [y1]

@@ -223,7 +223,7 @@ unfold :: Functor seq => (a -> MatterF anno pos neseq seq a) -> a -> Matter anno
 unfold = F.unfold
 
 mapSequence ::
-    (seq (SequencePart pos a) -> seq' (SequencePart pos a))
+    (SequenceAnno anno -> seq (SequencePart pos a) -> seq' (SequencePart pos a))
  ->
     MatterF anno pos neseq seq a
  ->
@@ -232,7 +232,7 @@ mapSequence ::
 mapSequence f = \case
     FlatF flt -> FlatF flt
     VariantF l r x -> VariantF l r x
-    SequenceF anno l xs r -> SequenceF anno l (f xs) r
+    SequenceF anno l xs r -> SequenceF anno l (f anno xs) r
     MetaGtF l x r y -> MetaGtF l x r y
     ParenF l x r -> ParenF l x r
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2

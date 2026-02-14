@@ -7,6 +7,7 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -20,6 +21,7 @@ module Language.Matter.Parser (
     ST.TextAnno,
     MatterParse (..),
     bytesAnnoSize,
+    sequenceAnnoBothCount,
     sequenceAnnoItemCount,
     sequenceAnnoMetaEqCount,
     textAnnoCounts,
@@ -40,6 +42,8 @@ module Language.Matter.Parser (
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
 import Data.Kind (Type)
+import Data.Vector (Vector)
+import Data.Vector qualified as V
 import Data.Word (Word32)
 import GHC.Show (showSpace)
 import Language.Matter.Tokenizer (OdToken (..), Pos (..), SdToken (..), Token (..))
@@ -71,6 +75,9 @@ sequenceAnnoItemCount (MkSequenceAnno n _nmeta) = n
 
 sequenceAnnoMetaEqCount :: ST.SequenceAnno Anno -> Word32
 sequenceAnnoMetaEqCount (MkSequenceAnno _n nmeta) = nmeta
+
+sequenceAnnoBothCount :: ST.SequenceAnno Anno -> Word32
+sequenceAnnoBothCount (MkSequenceAnno n nmeta) = n + nmeta
 
 data instance ST.TextAnno Anno =
     MkTextAnno !Pos
@@ -195,8 +202,13 @@ data Stk a =
     MetaGT_PinPin_OpenMetaLT !Pos a !Pos !Pos a !Pos !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
 
 -- | A data type the parser knows how to construct
-class MatterParse a where
-    type MatterSeq a :: Type -> Type
+class (
+        forall x. Show x => Show (MatterSeq a x)
+      ,
+        forall x. Eq x => Eq (MatterSeq a x)
+      ) =>
+        MatterParse a where
+    data MatterSeq a :: Type -> Type
 
     parseAlgebra :: ST.MatterF Anno Pos NonEmpty (MatterSeq a) a -> a
 
@@ -211,13 +223,19 @@ class MatterParse a where
 emptyStk :: Stk a
 emptyStk = Empty Nothing
 
-instance MatterParse (ST.Matter Anno Pos NonEmpty []) where
-    type MatterSeq (ST.Matter Anno Pos NonEmpty []) = []
+instance MatterParse (ST.Matter Anno Pos NonEmpty Vector) where
+    newtype MatterSeq (ST.Matter Anno Pos NonEmpty Vector) a =
+        MkMatterSeq [a]
+      deriving (Show, Eq)
 
-    parseAlgebra = ST.embed . ST.mapSequence reverse
+    parseAlgebra =
+        ST.embed . ST.mapSequence f
+      where
+        f anno (MkMatterSeq xs) =
+            fromIntegral (sequenceAnnoBothCount anno) `V.fromListN` reverse xs
 
-    emptyMatterSeq = []
-    snocMatterSeq = flip (:)
+    emptyMatterSeq = MkMatterSeq []
+    snocMatterSeq (MkMatterSeq xs) x = MkMatterSeq (x : xs)
 
 snoc :: MatterParse a => Pos -> Pos -> Stk a -> Token -> Maybe (Stk a)
 snoc l r = curry $ \case

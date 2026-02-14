@@ -11,6 +11,7 @@ import qualified Data.List.NonEmpty as NE
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
 import Data.Text.Short qualified as TS
+import Data.Vector (Vector)
 import Data.Word (Word32)
 import GHC.Exts (fromList)
 import Language.Matter.Interpreter qualified as I
@@ -42,7 +43,7 @@ tests = do
             print sz
             g <- getStdGen
             -- TODO how to inject some unnecessary OdWhitespace tokens? Should not be adjacent to OdWhiteSpace.
-            TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: Matter A P NonEmpty [])
+            TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: Matter A P NonEmpty Vector)
             putStrLn ""
     QC.sample' (QC.sized $ \sz -> (,) sz <$> G.generateMatter) >>= mapM_ f
 
@@ -245,7 +246,7 @@ testCases = [
 data TestCase =
     forall a. (Show a, Eq a) => MkTestCase String (ParseResult -> Maybe (a, a))
   |
-    MkRoundTrip Int (Matter A P NonEmpty [])
+    MkRoundTrip Int (Matter A P NonEmpty Vector)
 
 failing :: String -> TestCase
 failing s = MkTestCase s (\_ -> Nothing :: Maybe ((), ()))
@@ -284,7 +285,7 @@ doesItPass = \case
 
 -----
 
-type M = Matter P.Anno Pos NonEmpty []
+type M = Matter P.Anno Pos NonEmpty Vector
 
 data ParseResult =
     ParseDone M
@@ -322,7 +323,7 @@ prop_prettyThenParseIsSame =
     shrnk (g, m) = [ (g, m') | m' <- G.shrinkMatter m]
     noshow _ = []
 
-prop_prettyThenParseIsSame' :: (Int, Matter A P NonEmpty []) -> QC.Property
+prop_prettyThenParseIsSame' :: (Int, Matter A P NonEmpty Vector) -> QC.Property
 prop_prettyThenParseIsSame' (g, m) =
     QC.counterexample ("m = " <> show m)
   $ QC.counterexample ("g = " <> show g)
@@ -351,4 +352,4 @@ prop_prettyThenParseIsSame' (g, m) =
         runStateGen_ (mkStdGen g)
       $ \g' -> toLazyText
       $ foldMap (prettyToken g')
-      $ pretty (m :: Matter A P NonEmpty [])
+      $ pretty (m :: Matter A P NonEmpty Vector)
