@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
@@ -18,18 +19,18 @@ import Language.Matter.Tokenizer.Counting (D10, Four, Four')
 -- | Isomorph of @()@, easier on the eyes
 data P = MkP
 
-data Matter pos neseq seq =
-    Flat (Flat pos neseq)
+data Matter anno pos neseq seq =
+    Flat (Flat anno pos neseq)
   |
-    Variant !pos !pos (Matter pos neseq seq)
+    Variant !pos !pos (Matter anno pos neseq seq)
   |
-    Sequence !pos (seq (SequencePart pos (Matter pos neseq seq))) !pos
+    Sequence !pos (seq (SequencePart pos (Matter anno pos neseq seq))) !pos
   |
-    MetaGT !pos (Matter pos neseq seq) !pos !(ClosePin pos (Matter pos neseq seq))
+    MetaGT !pos (Matter anno pos neseq seq) !pos !(ClosePin pos (Matter anno pos neseq seq))
   |
-    Paren !pos (Matter pos neseq seq) !pos
+    Paren !pos (Matter anno pos neseq seq) !pos
   |
-    PinMetaLT !pos (Matter pos neseq seq) !pos !pos (Matter pos neseq seq) !pos
+    PinMetaLT !pos (Matter anno pos neseq seq) !pos !pos (Matter anno pos neseq seq) !pos
 
 data ClosePin pos a =
     NoClosePin a
@@ -40,18 +41,25 @@ data ClosePin pos a =
 
 -----
 
-data Flat pos neseq =
+data Flat anno pos neseq =
     Atom !pos !pos
   |
-    Bytes !pos !pos (MoreBytes pos)
+    Bytes !(BytesAnno anno) !pos !pos (MoreBytes pos)
   |
-    Number !pos !pos !(MaybeFraction pos) !(MaybeExponent pos)
+    Number !(NumberAnno anno) !pos !pos !(MaybeFraction pos) !(MaybeExponent pos)
   |
-    Text (Text pos neseq)
+    Text !(TextAnno anno) (Text pos neseq)
 
 data MaybeFraction pos = NothingFraction | JustFraction !pos !pos
 
 data MaybeExponent pos = NothingExponent | JustExponent !pos !pos
+
+data family BytesAnno anno
+data family NumberAnno anno
+data family TextAnno anno
+
+class (Show (BytesAnno anno), Show (NumberAnno anno), Show (TextAnno anno)) => ShowAnno anno
+class (Eq (BytesAnno anno), Eq (NumberAnno anno), Eq (TextAnno anno)) => EqAnno anno
 
 -----
 
@@ -98,9 +106,9 @@ data SequencePart pos a =
 -----
 
 deriving instance Show P
-deriving instance (Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos (Matter pos neseq seq)))) => Show (Matter pos neseq seq)
+deriving instance (ShowAnno anno, Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos (Matter anno pos neseq seq)))) => Show (Matter anno pos neseq seq)
 deriving instance (Show pos, Show a) => Show (ClosePin pos a)
-deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Flat pos neseq)
+deriving instance (ShowAnno anno, Show pos, Show (neseq (Escape pos))) => Show (Flat anno pos neseq)
 deriving instance Show pos => Show (MaybeFraction pos)
 deriving instance Show pos => Show (MaybeExponent pos)
 deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Text pos neseq)
@@ -112,9 +120,9 @@ deriving instance Show pos => Show (MoreBytes pos)
 deriving instance (Show pos, Show a) => Show (SequencePart pos a)
 
 deriving instance Eq P
-deriving instance (Eq pos, Eq (neseq (Escape pos)), Eq (seq (SequencePart pos (Matter pos neseq seq)))) => Eq (Matter pos neseq seq)
+deriving instance (EqAnno anno, Eq pos, Eq (neseq (Escape pos)), Eq (seq (SequencePart pos (Matter anno pos neseq seq)))) => Eq (Matter anno pos neseq seq)
 deriving instance (Eq pos, Eq a) => Eq (ClosePin pos a)
-deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Flat pos neseq)
+deriving instance (EqAnno anno, Eq pos, Eq (neseq (Escape pos))) => Eq (Flat anno pos neseq)
 deriving instance Eq pos => Eq (MaybeFraction pos)
 deriving instance Eq pos => Eq (MaybeExponent pos)
 instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Text pos neseq) where
@@ -152,8 +160,8 @@ joinerEquality = curry $ \case
 -----
 
 -- | The 'F.Base' functor of 'Matter'
-data MatterF pos neseq seq a =
-    FlatF (Flat pos neseq)
+data MatterF anno pos neseq seq a =
+    FlatF (Flat anno pos neseq)
   |
     VariantF !pos !pos a
   |
@@ -165,10 +173,10 @@ data MatterF pos neseq seq a =
   |
     PinMetaLtF !pos a !pos !pos a !pos
 
-deriving instance Functor seq => Functor (MatterF pos neseq seq)
+deriving instance Functor seq => Functor (MatterF anno pos neseq seq)
 
 -- | Project one layer of 'MatterF'
-project :: Matter pos neseq seq -> MatterF pos neseq seq (Matter pos neseq seq)
+project :: Matter anno pos neseq seq -> MatterF anno pos neseq seq (Matter anno pos neseq seq)
 {-# INLINE project #-}
 project = \case
     Flat flt -> FlatF flt
@@ -179,7 +187,7 @@ project = \case
     PinMetaLT l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
 
 -- | Inverse of 'project'
-embed :: MatterF pos neseq seq (Matter pos neseq seq) -> Matter pos neseq seq
+embed :: MatterF anno pos neseq seq (Matter anno pos neseq seq) -> Matter anno pos neseq seq
 {-# INLINE embed #-}
 embed = \case
     FlatF flt -> Flat flt
@@ -189,25 +197,25 @@ embed = \case
     ParenF l x r -> Paren l x r
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLT l1 x r1 l2 y r2
 
-type instance F.Base (Matter pos neseq seq) = MatterF pos neseq seq
-instance Functor seq => F.Recursive (Matter pos neseq seq) where project = project
-instance Functor seq => F.Corecursive (Matter pos neseq seq) where embed = embed
+type instance F.Base (Matter anno pos neseq seq) = MatterF anno pos neseq seq
+instance Functor seq => F.Recursive (Matter anno pos neseq seq) where project = project
+instance Functor seq => F.Corecursive (Matter anno pos neseq seq) where embed = embed
 
 -- | Specialization of 'F.fold' from "Data.Functor.Foldable"
-fold :: Functor seq => (MatterF pos neseq seq a -> a) -> Matter pos neseq seq -> a
+fold :: Functor seq => (MatterF anno pos neseq seq a -> a) -> Matter anno pos neseq seq -> a
 {-# INLINE fold #-}
 fold = F.fold
 
 -- | Specialization of 'F.unfold' from "Data.Functor.Foldable"
-unfold :: Functor seq => (a -> MatterF pos neseq seq a) -> a -> Matter pos neseq seq
+unfold :: Functor seq => (a -> MatterF anno pos neseq seq a) -> a -> Matter anno pos neseq seq
 unfold = F.unfold
 
 mapSequence ::
     (seq (SequencePart pos a) -> seq' (SequencePart pos a))
  ->
-    MatterF pos neseq seq a
+    MatterF anno pos neseq seq a
  ->
-    MatterF pos neseq seq' a
+    MatterF anno pos neseq seq' a
 {-# INLINE mapSequence #-}
 mapSequence f = \case
     FlatF flt -> FlatF flt
@@ -218,14 +226,14 @@ mapSequence f = \case
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
 
 mapPositions ::
-  forall pos pos' seq neseq a.
+  forall anno pos pos' seq neseq a.
         (Functor seq, Functor neseq)
      =>
         (pos -> pos')
      ->
-        MatterF pos neseq seq a
+        MatterF anno pos neseq seq a
      ->
-        MatterF pos' neseq seq a
+        MatterF anno pos' neseq seq a
 {-# INLINE mapPositions #-}
 mapPositions f = \case
     FlatF flt -> FlatF (flat flt)
@@ -237,9 +245,9 @@ mapPositions f = \case
   where
     flat = \case
         Atom l r -> Atom (f l) (f r)
-        Bytes l r more -> Bytes (f l) (f r) (moreBytes more)
-        Number l r fpart epart -> Number (f l) (f r) (fractionPart fpart) (exponentPart epart)
-        Text txt -> Text (text txt)
+        Bytes anno l r more -> Bytes anno (f l) (f r) (moreBytes more)
+        Number anno l r fpart epart -> Number anno (f l) (f r) (fractionPart fpart) (exponentPart epart)
+        Text anno txt -> Text anno (text txt)
 
     moreBytes = \case
         NoMoreBytes -> NoMoreBytes
@@ -277,3 +285,40 @@ mapPositions f = \case
         NoClosePin y -> NoClosePin y
         OnlyClosePin l y r -> OnlyClosePin (f l) y (f r)
         BothPins l1 y1 r1 l2 y2 r2 -> BothPins (f l1) y1 (f r1) (f l2) y2 (f r2)
+
+mapAnno ::
+  forall anno anno' pos seq neseq a.
+        Functor seq
+     =>
+        (BytesAnno anno -> BytesAnno anno')
+     ->
+        (NumberAnno anno -> NumberAnno anno')
+     ->
+        (TextAnno anno -> TextAnno anno')
+     ->
+        MatterF anno pos neseq seq a
+     ->
+        MatterF anno' pos neseq seq a
+{-# INLINE mapAnno #-}
+mapAnno f g h = \case
+    FlatF flt -> FlatF (flat flt)
+    VariantF l r x -> VariantF l r x
+    SequenceF l xs r -> SequenceF l (fmap sequencePart xs) r
+    MetaGtF l x r y -> MetaGtF l x r (closePin y)
+    ParenF l x r -> ParenF l x r
+    PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
+  where
+    flat = \case
+        Atom l r -> Atom l r
+        Bytes anno l r more -> Bytes (f anno) l r more
+        Number anno l r fpart epart -> Number (g anno) l r fpart epart
+        Text anno txt -> Text (h anno) txt
+
+    sequencePart = \case
+        Item x -> Item x
+        MetaEQ l x r -> MetaEQ l x r
+
+    closePin = \case
+        NoClosePin y -> NoClosePin y
+        OnlyClosePin l y r -> OnlyClosePin l y r
+        BothPins l1 y1 r1 l2 y2 r2 -> BothPins l1 y1 r1 l2 y2 r2

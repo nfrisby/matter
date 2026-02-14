@@ -16,7 +16,8 @@ import Language.Matter.Tokenizer.Counting (Four (..))
 import Language.Matter.Tokenizer.Pretty (prettyToken, toLazyText)
 import Language.Matter.Tokenizer.Tests (printWithPositions)
 import Language.Matter.SyntaxTree
-import Language.Matter.SyntaxTree.Generator (generateMatter, shrinkMatter)
+import Language.Matter.SyntaxTree.Generator (A)
+import Language.Matter.SyntaxTree.Generator qualified as G
 import Language.Matter.SyntaxTree.Pretty (pretty)
 import System.Exit (exitFailure)
 import System.Random (mkStdGen)
@@ -37,9 +38,9 @@ tests = do
             print sz
             g <- getStdGen
             -- TODO how to inject some unnecessary OdWhitespace tokens? Should not be adjacent to OdWhiteSpace.
-            TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: Matter P NonEmpty [])
+            TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: Matter A P NonEmpty [])
             putStrLn ""
-    QC.sample' (QC.sized $ \sz -> (,) sz <$> generateMatter) >>= mapM_ f
+    QC.sample' (QC.sized $ \sz -> (,) sz <$> G.generateMatter) >>= mapM_ f
 
     QC.quickCheckWith QC.stdArgs{QC.maxSuccess = 100000} prop_prettyThenParseIsSame
 
@@ -116,7 +117,7 @@ testCases = [
 
   , passing "_<%d0af>'0''0'"
 
-  , MkRoundTrip 0 $ Flat $ Text
+  , MkRoundTrip 0 $ Flat $ Text G.MkTextA
       $ Suppressor MkP MkP
             (ConsJoinerEscapes (MkEscape MkP Four1 NE.:| [MkEscape MkP Four1]) $ NilJoiner MkP)
       $ TextLiteral DoubleQuote MkP MkP
@@ -124,7 +125,7 @@ testCases = [
 
   , passing "_<%25%C398>\"\""
 
-  , MkRoundTrip 0 $ Flat $ Text
+  , MkRoundTrip 0 $ Flat $ Text G.MkTextA
       $ Suppressor MkP MkP
           (ConsJoinerEscapes (MkEscape MkP Four2 NE.:| [MkEscape MkP Four1]) (NilJoiner MkP))
       $ TextLiteral DoubleQuote MkP MkP
@@ -135,7 +136,7 @@ testCases = [
 data TestCase =
     MkTestCase String Bool
   |
-    MkRoundTrip Int (Matter P NonEmpty [])
+    MkRoundTrip Int (Matter A P NonEmpty [])
 
 failing :: String -> TestCase
 failing s = MkTestCase s False
@@ -166,7 +167,7 @@ doesItPass = \case
 
 -----
 
-type M = Matter Pos NonEmpty []
+type M = Matter P.Anno Pos NonEmpty []
 
 data ParseResult =
     ParseDone M
@@ -200,11 +201,11 @@ prop_prettyThenParseIsSame :: QC.Property
 prop_prettyThenParseIsSame =
     QC.propertyForAllShrinkShow gen shrnk noshow prop_prettyThenParseIsSame'
   where
-    gen = liftA2 (,) (QC.choose (minBound, maxBound)) generateMatter
-    shrnk (g, m) = [ (g, m') | m' <- shrinkMatter m]
+    gen = liftA2 (,) (QC.choose (minBound, maxBound)) G.generateMatter
+    shrnk (g, m) = [ (g, m') | m' <- G.shrinkMatter m]
     noshow _ = []
 
-prop_prettyThenParseIsSame' :: (Int, Matter P NonEmpty []) -> QC.Property
+prop_prettyThenParseIsSame' :: (Int, Matter A P NonEmpty []) -> QC.Property
 prop_prettyThenParseIsSame' (g, m) =
     QC.counterexample ("m = " <> show m)
   $ QC.counterexample ("g = " <> show g)
@@ -213,7 +214,7 @@ prop_prettyThenParseIsSame' (g, m) =
         ParseDone m' ->
             QC.counterexample ("m' = " <> show m')
           $ QC.counterexample "ParseDone"
-          $ m == forgetPos m'
+          $ m == forget m'
         ParseStuck l mbTk r stk ->
             QC.counterexample ("stk = " <> show stk)
           $ QC.counterexample ("(l, mbTk, r) = " <> show (l, mbTk, r))
@@ -224,10 +225,10 @@ prop_prettyThenParseIsSame' (g, m) =
           $ QC.counterexample "TokenizerError"
           $ QC.property False
   where
-    forgetPos = fold $ embed . mapPositions (\_ -> MkP)
+    forget = fold $ embed . mapPositions (\_ -> MkP) . mapAnno (\_ -> G.MkBytesA) (\_ -> G.MkNumberA) (\_ -> G.MkTextA)
 
     txt =
         runStateGen_ (mkStdGen g)
       $ \g' -> toLazyText
       $ foldMap (prettyToken g')
-      $ pretty (m :: Matter P NonEmpty [])
+      $ pretty (m :: Matter A P NonEmpty [])

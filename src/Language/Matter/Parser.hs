@@ -13,6 +13,10 @@
 {-# OPTIONS_GHC -fmax-pmcheck-models=60 #-}
 
 module Language.Matter.Parser (
+    Anno,
+    ST.BytesAnno (MkBytesAnno),
+    ST.NumberAnno (MkNumberAnno),
+    ST.TextAnno (MkTextAnno),
     MatterParse (..),
 
     Stk,
@@ -35,6 +39,28 @@ import GHC.Show (showSpace)
 import Language.Matter.Tokenizer (OdToken (..), Pos (..), SdToken (..), Token (..))
 import Language.Matter.Tokenizer qualified as T
 import Language.Matter.SyntaxTree qualified as ST
+
+data Anno
+
+data instance ST.BytesAnno Anno =
+    -- | How many bytes
+    MkBytesAnno -- !Word32
+  deriving (Eq, Show)
+
+data instance ST.NumberAnno Anno =
+    -- | TODO
+    MkNumberAnno
+  deriving (Eq, Show)
+
+data instance ST.TextAnno Anno =
+    -- | Counts after reducing all the joiners
+    MkTextAnno -- !Pos
+  deriving (Eq, Show)
+
+instance ST.ShowAnno Anno
+instance ST.EqAnno Anno
+
+-----
 
 data FLAT =
     I | F
@@ -144,7 +170,7 @@ data Stk a =
 class MatterParse a where
     type MatterSeq a :: Type -> Type
 
-    parseAlgebra :: ST.MatterF Pos NonEmpty (MatterSeq a) a -> a
+    parseAlgebra :: ST.MatterF Anno Pos NonEmpty (MatterSeq a) a -> a
 
     emptyMatterSeq :: MatterSeq a (ST.SequencePart Pos a)
     snocMatterSeq ::
@@ -157,8 +183,8 @@ class MatterParse a where
 emptyStk :: Stk a
 emptyStk = Empty Nothing
 
-instance MatterParse (ST.Matter Pos NonEmpty []) where
-    type MatterSeq (ST.Matter Pos NonEmpty []) = []
+instance MatterParse (ST.Matter Anno Pos NonEmpty []) where
+    type MatterSeq (ST.Matter Anno Pos NonEmpty []) = []
 
     parseAlgebra = ST.embed . ST.mapSequence reverse
 
@@ -172,9 +198,9 @@ snoc l r = curry $ \case
     (Flat (IntegerPart l1 r1) stk, OdToken OdFractionPart) ->
         Just $ Flat (FractionPart l r $ IntegerPart l1 r1) stk
     (Flat (FractionPart l2 r2 (IntegerPart l1 r1)) stk, OdToken OdExponentPart) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent l r)
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent l r)
     (Flat (IntegerPart l1 r1) stk, OdToken OdExponentPart) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number l1 r1 ST.NothingFraction (ST.JustExponent l r)
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno l1 r1 ST.NothingFraction (ST.JustExponent l r)
 
     (_stk, OdToken OdFractionPart) -> Nothing
     (_stk, OdToken OdExponentPart) -> Nothing
@@ -391,16 +417,16 @@ pop = \case
     
 popFlat :: MatterParse a => Flat x -> Maybe a
 popFlat = \case
-    IntegerPart l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number l r ST.NothingFraction ST.NothingExponent
-    FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
+    IntegerPart l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno l r ST.NothingFraction ST.NothingExponent
+    FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
     Suppressor{} -> Nothing
-    x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text $ popT ST.NoMoreText x
+    x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text MkTextAnno $ popT ST.NoMoreText x
     OpenTextJoiner{} -> Nothing
     JoinerText{} -> Nothing
     Escapes{} -> Nothing
     CloseTextJoiner{} -> Nothing
     MoreSuppressor{} -> Nothing
-    x@MoreText{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text $ popT ST.NoMoreText x
+    x@MoreText{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text MkTextAnno $ popT ST.NoMoreText x
     x@Bytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes ST.NoMoreBytes x
     OpenBytesJoiner{} -> Nothing
     CloseBytesJoiner{} -> Nothing
@@ -422,7 +448,7 @@ popUT jp j acc fstk = case (utOf fstk, fstk) of
     (SingU, MoreSuppressor p2 (CloseTextJoiner p1 fstk')) -> case popSomeJo (ST.NilJoiner p1) fstk' of
         PoppedTextJoiner jp' j' fstk'' -> popUT jp' j' (ST.Suppressor p2 jp j acc) fstk''
 
-    (SingT, fstk') -> popT (ST.MoreText jp j acc) fstk'
+    (SingT, fstk') -> popT  (ST.MoreText jp j acc) fstk'
 
 popSomeJo :: (forall j'. ST.Joiner Pos NonEmpty j') -> Flat (Jo j) -> PoppedTextJoiner
 popSomeJo j = \case
@@ -440,10 +466,10 @@ popJoJt j = \case
     OpenTextJoiner p fstk -> PoppedTextJoiner p j fstk
     JoinerText l r fstk -> popJoJe (ST.ConsJoinerText l r j) fstk
 
-popBytes :: ST.MoreBytes Pos -> Flat B -> ST.Flat Pos NonEmpty
+popBytes :: ST.MoreBytes Pos -> Flat B -> ST.Flat Anno Pos NonEmpty
 popBytes acc = \case
-    Bytes l r -> ST.Bytes l r acc
-    MoreBytes l r (CloseBytesJoiner _r (OpenBytesJoiner p fstk)) -> popBytes (ST.MoreBytes p l r acc) fstk
+    Bytes l r -> ST.Bytes MkBytesAnno l r acc
+    MoreBytes l r (CloseBytesJoiner _r (OpenBytesJoiner p fstk)) -> popBytes (ST.MoreBytes p l r acc) fstk   -- TODO
 
 -----
 

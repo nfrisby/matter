@@ -1,8 +1,14 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TypeFamilies #-}
 
-module Language.Matter.SyntaxTree.Generator (module Language.Matter.SyntaxTree.Generator) where
+module Language.Matter.SyntaxTree.Generator (
+    module Language.Matter.SyntaxTree.Generator,
+    BytesAnno (MkBytesA),
+    NumberAnno (MkNumberA),
+    TextAnno (MkTextA),
+  ) where
 
 import Data.Functor ((<&>))
 import Data.List.NonEmpty (NonEmpty)
@@ -13,6 +19,17 @@ import System.Random.SplitMix (mkSMGen)
 import Math.Combinat.Partitions.Integer qualified as Combinat
 import Test.QuickCheck (shrinkList)
 import Test.QuickCheck.Gen qualified as QC
+
+data A
+
+data instance BytesAnno A = MkBytesA deriving (Eq, Show)
+data instance NumberAnno A = MkNumberA deriving (Eq, Show)
+data instance TextAnno A = MkTextA deriving (Eq, Show)
+
+instance ShowAnno A
+instance EqAnno A
+
+-----
 
 frequency :: NonEmpty (Int, QC.Gen a) -> QC.Gen a
 frequency =
@@ -36,7 +53,7 @@ sizeParts sz = do
 -----
 
 -- | Generates a 'Matter' that strictly respects 'QC.sized'
-generateMatter :: QC.Gen (Matter P NonEmpty [])
+generateMatter :: QC.Gen (Matter A P NonEmpty [])
 generateMatter =
     QC.sized $ \sz ->
         if sz < 1 then pure (Sequence MkP [] MkP) else   -- the smallest visual /obvious/ option
@@ -55,14 +72,14 @@ generateMatter =
           $ ([ ( 1,          generatePinMetaLT) | 3 < sz ] ++)
           $ []
 
-generateSequence :: QC.Gen (Matter P NonEmpty [])
+generateSequence :: QC.Gen (Matter A P NonEmpty [])
 generateSequence =
     QC.sized $ \sz -> do
         szs <- sizeParts $ max 1 sz - 1
         xs <- mapM (flip QC.resize generateSequencePart) szs
         pure $ Sequence MkP xs MkP
 
-generateSequencePart :: QC.Gen (SequencePart P (Matter P NonEmpty []))
+generateSequencePart :: QC.Gen (SequencePart P (Matter A P NonEmpty []))
 generateSequencePart =
     QC.sized $ \sz ->
         frequency $
@@ -70,26 +87,26 @@ generateSequencePart =
           $ ([ ( 1, (\x -> MetaEQ MkP x MkP) <$> QC.resize (sz - 2) generateMatter) | 2 < sz ] ++)
           $ []
 
-generateAtom :: QC.Gen (Flat P NonEmpty)
+generateAtom :: QC.Gen (Flat A P NonEmpty)
 generateAtom =
     pure $ Atom MkP MkP
 
-generateNumber :: QC.Gen (Flat P NonEmpty)
+generateNumber :: QC.Gen (Flat A P NonEmpty)
 generateNumber =
     QC.sized $ \sz ->
-        fmap (uncurry (Number MkP MkP))
+        fmap (uncurry (Number MkNumberA MkP MkP))
       $ case compare sz 2 of
             LT -> pure (NothingFraction, NothingExponent)
             EQ -> oneof $ pure (JustFraction MkP MkP, NothingExponent) NE.:| [pure (NothingFraction, JustExponent MkP MkP)]
             GT -> pure (JustFraction MkP MkP, JustExponent MkP MkP)
 
-generateBytes :: QC.Gen (Flat P NonEmpty)
+generateBytes :: QC.Gen (Flat A P NonEmpty)
 generateBytes =
     QC.sized $ \sz ->
-        pure $ Bytes MkP MkP $ foldr ($) NoMoreBytes $ replicate (max 1 sz - 1) $ MoreBytes MkP MkP MkP
+        pure $ Bytes MkBytesA MkP MkP $ foldr ($) NoMoreBytes $ replicate (max 1 sz - 1) $ MoreBytes MkP MkP MkP
 
-generateText :: QC.Gen (Flat P NonEmpty)
-generateText = Text <$> generateText'
+generateText :: QC.Gen (Flat A P NonEmpty)
+generateText = Text MkTextA <$> generateText'
 
 generateText' :: QC.Gen (Text P NonEmpty)
 generateText' =
@@ -157,7 +174,7 @@ generateFour'D10 =
   where
     d10 = oneof $ fmap pure $ D10_0 NE.:| [D10_1,D10_2,D10_3,D10_4,D10_5,D10_6,D10_7,D10_8,D10_9]
 
-generateVariant :: QC.Gen (Matter P NonEmpty [])
+generateVariant :: QC.Gen (Matter A P NonEmpty [])
 generateVariant =
     QC.sized $ \sz -> do
         n <- frequency $
@@ -169,13 +186,13 @@ generateVariant =
         x <- QC.resize (max n sz - n) generateMatter
         pure $ foldr ($) x $ replicate n $ Variant MkP MkP
 
-generateParen :: QC.Gen (Matter P NonEmpty [])
+generateParen :: QC.Gen (Matter A P NonEmpty [])
 generateParen =
     QC.sized $ \sz -> do
         x <- QC.resize (max 1 sz - 1) generateMatter
         pure $ Paren MkP x MkP
 
-generateMetaGT :: QC.Gen (Matter P NonEmpty [])
+generateMetaGT :: QC.Gen (Matter A P NonEmpty [])
 generateMetaGT =
     QC.sized $ \sz -> do
         (l, r) <- sizeHalves $ max 1 sz - 1
@@ -191,7 +208,7 @@ generateMetaGT =
           $ []
         pure $ MetaGT MkP x MkP y
 
-generatePinMetaLT :: QC.Gen (Matter P NonEmpty [])
+generatePinMetaLT :: QC.Gen (Matter A P NonEmpty [])
 generatePinMetaLT =
     QC.sized $ \sz -> do
         (l, r) <- sizeHalves $ max 2 sz - 2
@@ -202,7 +219,7 @@ generatePinMetaLT =
 -----
 
 -- | TODO very incomplete
-shrinkMatter :: Matter pos neseq [] -> [Matter pos neseq []]
+shrinkMatter :: Matter A pos neseq [] -> [Matter A pos neseq []]
 shrinkMatter = \case
     Flat flt -> map Flat $ flat flt
     Variant l r x -> x  : [Variant l r x' | x' <- shrinkMatter x]
@@ -218,13 +235,13 @@ shrinkMatter = \case
   where
     flat = \case
         Atom{} -> []
-        Bytes _l _r NoMoreBytes -> []
-        Bytes _l _r (MoreBytes _p l r more) -> [Bytes l r more]
-        Number l r fpart epart -> case (fpart, epart) of
+        Bytes _anno _l _r NoMoreBytes -> []
+        Bytes _anno _l _r (MoreBytes _p l r more) -> [Bytes MkBytesA l r more]
+        Number _anno l r fpart epart -> case (fpart, epart) of
             (NothingFraction, NothingExponent) -> []
-            (JustFraction{}, NothingExponent) -> [Number l r NothingFraction epart]
-            (NothingFraction, JustExponent{}) -> [Number l r fpart NothingExponent]
-            (JustFraction{}, JustExponent{}) -> [Number l r fpart NothingExponent,Number l r NothingFraction epart]
+            (JustFraction{}, NothingExponent) -> [Number MkNumberA l r NothingFraction epart]
+            (NothingFraction, JustExponent{}) -> [Number MkNumberA l r fpart NothingExponent]
+            (JustFraction{}, JustExponent{}) -> [Number MkNumberA l r fpart NothingExponent, Number MkNumberA l r NothingFraction epart]
         Text{} -> []
 
     sequencePart = \case

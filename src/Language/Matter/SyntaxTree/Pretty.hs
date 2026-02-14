@@ -36,7 +36,7 @@ consDList x y = x DNE.:| y
 
 -----
 
-pretty :: (Functor seq, Foldable seq, Foldable neseq) => Matter pos neseq seq -> DNonEmpty Token
+pretty :: (Functor seq, Foldable seq, Foldable neseq) => Matter anno pos neseq seq -> DNonEmpty Token
 pretty =
     fold phi
   where
@@ -60,11 +60,11 @@ prettySequencePart = \case
     Item x -> x
     MetaEQ _l x _r -> sd (SdOpenMeta EQ) <> x <> sd (SdCloseMeta EQ)
 
-prettyFlat :: Foldable neseq => Flat pos neseq -> DNonEmpty Token
+prettyFlat :: Foldable neseq => Flat anno pos neseq -> DNonEmpty Token
 prettyFlat = \case
     Atom _l _r -> od OdAtom
-    Bytes _l _r more -> OdToken OdBytes `consDList` prettyMoreBytes more
-    Number _l _r fractionPart exponentPart ->
+    Bytes _anno _l _r more -> OdToken OdBytes `consDList` prettyMoreBytes more
+    Number _anno _l _r fractionPart exponentPart ->
         let x = case fractionPart of
                 NothingFraction -> mempty
                 JustFraction _l _r -> od' OdFractionPart
@@ -73,7 +73,7 @@ prettyFlat = \case
                 JustExponent _l _r -> od' OdExponentPart
         in
         OdToken OdIntegerPart `consDList` (x <> y)
-    Text txt -> prettyText txt
+    Text _anno txt -> prettyText txt
 
 prettyMoreBytes :: MoreBytes pos -> DList Token
 prettyMoreBytes = \case
