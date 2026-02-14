@@ -28,6 +28,7 @@ data A
 data instance BytesAnno A = MkBytesA deriving (Eq, Show)
 data instance NumberAnno A = MkNumberA deriving (Eq, Show)
 data instance SequenceAnno A = MkSequenceA deriving (Eq, Show)
+data instance SymbolAnno A = MkSymbolA deriving (Eq, Show)
 data instance TextAnno A = MkTextA deriving (Eq, Show)
 
 instance ShowAnno A
@@ -93,7 +94,7 @@ generateSequencePart =
 
 generateAtom :: QC.Gen (Flat A P NonEmpty)
 generateAtom =
-    pure $ Atom MkP MkP
+    pure $ Atom MkSymbolA MkP MkP
 
 generateNumber :: QC.Gen (Flat A P NonEmpty)
 generateNumber =
@@ -194,7 +195,7 @@ generateVariant =
           $ ([ ( 1, QC.choose (4, sz - 1)) | 4 < sz ] ++)
           $ []
         x <- QC.resize (max n sz - n) generateMatter
-        pure $ foldr ($) x $ replicate n $ Variant MkP MkP
+        pure $ foldr ($) x $ replicate n $ Variant MkSymbolA MkP MkP
 
 generateParen :: QC.Gen (Matter A P NonEmpty Vector)
 generateParen =
@@ -232,7 +233,7 @@ generatePinMetaLT =
 shrinkMatter :: Matter A pos neseq Vector -> [Matter A pos neseq Vector]
 shrinkMatter = \case
     Flat flt -> map Flat $ flat flt
-    Variant l r x -> x  : [Variant l r x' | x' <- shrinkMatter x]
+    Variant _anno l r x -> x  : [Variant MkSymbolA l r x' | x' <- shrinkMatter x]
     Sequence _anno l xs r ->
         (case V.toList xs of [Item x] -> (x :); [MetaEQ _l x _r] -> (x :); _ -> id)
       $ [ Sequence MkSequenceA l (V.fromList xs') r

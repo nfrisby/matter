@@ -61,7 +61,7 @@ data instance ST.BytesAnno Anno =
 bytesAnnoSize :: ST.BytesAnno Anno -> Word32
 bytesAnnoSize (MkBytesAnno n) = n
 
--- | TODO digit counts
+-- | TODO digit counts?
 data instance ST.NumberAnno Anno =
     MkNumberAnno
   deriving (Eq, Show)
@@ -78,6 +78,10 @@ sequenceAnnoMetaEqCount (MkSequenceAnno _n nmeta) = nmeta
 
 sequenceAnnoBothCount :: ST.SequenceAnno Anno -> Word32
 sequenceAnnoBothCount (MkSequenceAnno n nmeta) = n + nmeta
+
+data instance ST.SymbolAnno Anno =
+    MkSymbolAnno
+  deriving (Eq, Show)
 
 data instance ST.TextAnno Anno =
     MkTextAnno !Pos
@@ -345,7 +349,7 @@ snoc l r = curry $ \case
 
     -- @
     (stk, OdToken OdAtom) ->
-        push (simplify stk) $ parseAlgebra $ ST.FlatF $ ST.Atom l r
+        push (simplify stk) $ parseAlgebra $ ST.FlatF $ ST.Atom MkSymbolAnno l r
     -- 0
     (stk, OdToken (OdIntegerPart mbSign)) ->
         Just $ Flat (IntegerPart mbSign l r) $ simplify stk
@@ -560,7 +564,7 @@ push = flip $ \m -> \case
     Flat{} ->
         Nothing
     OpenVariant l r stk ->
-        push stk $ parseAlgebra $ ST.VariantF l r m
+        push stk $ parseAlgebra $ ST.VariantF MkSymbolAnno l r m
     OpenSequence p acc n nmeta stk ->
         Just $ OpenSequence p (snocMatterSeq acc $ ST.Item m) (n + 1) nmeta stk
     Sequence_OpenMetaEQ p1 acc n nmeta p2 mb stk ->

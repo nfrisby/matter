@@ -227,17 +227,17 @@ testCases = [
         _ -> Nothing
 
   , passingAnd "@foo" $ \s -> \case
-        Flat (Atom l r) ->
+        Flat (Atom _anno l r) ->
             Just (I.interpretSymbol s l r, TS.pack "foo")
         _ -> Nothing
 
   , passingAnd "#foo []" $ \s -> \case
-        Variant l r _ ->
+        Variant _anno l r _ ->
             Just (I.interpretSymbol s l r, TS.pack "foo")
         _ -> Nothing
 
   , passingAnd "# []" $ \s -> \case
-        Variant l r _ ->
+        Variant _anno l r _ ->
             Just (I.interpretSymbol s l r, TS.pack "")
         _ -> Nothing
 
@@ -346,7 +346,7 @@ prop_prettyThenParseIsSame' (g, m) =
     forget =
         fold $ embed
              . mapPositions (\_ -> MkP)
-             . mapAnno (\_ -> G.MkBytesA) (\_ -> G.MkNumberA) (\_ -> G.MkSequenceA) (\_ -> G.MkTextA)
+             . mapAnno (\_ -> G.MkBytesA) (\_ -> G.MkNumberA) (\_ -> G.MkSequenceA) (\_ -> G.MkSymbolA) (\_ -> G.MkTextA)
 
     txt =
         runStateGen_ (mkStdGen g)

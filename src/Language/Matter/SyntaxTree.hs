@@ -22,7 +22,7 @@ data P = MkP
 data Matter anno pos neseq seq =
     Flat !(Flat anno pos neseq)
   |
-    Variant !pos !pos (Matter anno pos neseq seq)
+    Variant !(SymbolAnno anno) !pos !pos (Matter anno pos neseq seq)
   |
     Sequence !(SequenceAnno anno) !pos (seq (SequencePart pos (Matter anno pos neseq seq))) !pos
   |
@@ -32,6 +32,7 @@ data Matter anno pos neseq seq =
   |
     PinMetaLT !pos (Matter anno pos neseq seq) !pos !pos (Matter anno pos neseq seq) !pos
 
+data family SymbolAnno anno
 data family SequenceAnno anno
 
 data ClosePin pos a =
@@ -44,7 +45,7 @@ data ClosePin pos a =
 -----
 
 data Flat anno pos neseq =
-    Atom !pos !pos
+    Atom !(SymbolAnno anno) !pos !pos
   |
     Bytes !(BytesAnno anno) {-# UNPACK #-} !(Bytes pos)
   |
@@ -110,8 +111,8 @@ data SequencePart pos a =
 
 -----
 
-class (Show (BytesAnno anno), Show (NumberAnno anno), Show (SequenceAnno anno), Show (TextAnno anno)) => ShowAnno anno
-class (Eq (BytesAnno anno), Eq (NumberAnno anno), Eq (SequenceAnno anno), Eq (TextAnno anno)) => EqAnno anno
+class (Show (BytesAnno anno), Show (NumberAnno anno), Show (SequenceAnno anno), Show (SymbolAnno anno), Show (TextAnno anno)) => ShowAnno anno
+class (Eq (BytesAnno anno), Eq (NumberAnno anno), Eq (SequenceAnno anno), Eq (SymbolAnno anno), Eq (TextAnno anno)) => EqAnno anno
 
 deriving instance Show P
 deriving instance (ShowAnno anno, Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos (Matter anno pos neseq seq)))) => Show (Matter anno pos neseq seq)
@@ -175,7 +176,7 @@ joinerEquality = curry $ \case
 data MatterF anno pos neseq seq a =
     FlatF (Flat anno pos neseq)
   |
-    VariantF !pos !pos a
+    VariantF !(SymbolAnno anno) !pos !pos a
   |
     SequenceF !(SequenceAnno anno) !pos (seq (SequencePart pos a)) !pos
   |
@@ -192,7 +193,7 @@ project :: Matter anno pos neseq seq -> MatterF anno pos neseq seq (Matter anno 
 {-# INLINE project #-}
 project = \case
     Flat flt -> FlatF flt
-    Variant l r x -> VariantF l r x
+    Variant anno l r x -> VariantF anno l r x
     Sequence anno l xs r -> SequenceF anno l xs r
     MetaGT l x r y -> MetaGtF l x r y
     Paren l x r -> ParenF l x r
@@ -203,7 +204,7 @@ embed :: MatterF anno pos neseq seq (Matter anno pos neseq seq) -> Matter anno p
 {-# INLINE embed #-}
 embed = \case
     FlatF flt -> Flat flt
-    VariantF l r x -> Variant l r x
+    VariantF anno l r x -> Variant anno l r x
     SequenceF anno l xs r -> Sequence anno l xs r
     MetaGtF l x r y -> MetaGT l x r y
     ParenF l x r -> Paren l x r
@@ -231,7 +232,7 @@ mapSequence ::
 {-# INLINE mapSequence #-}
 mapSequence f = \case
     FlatF flt -> FlatF flt
-    VariantF l r x -> VariantF l r x
+    VariantF anno l r x -> VariantF anno l r x
     SequenceF anno l xs r -> SequenceF anno l (f anno xs) r
     MetaGtF l x r y -> MetaGtF l x r y
     ParenF l x r -> ParenF l x r
@@ -249,15 +250,15 @@ mapPositions ::
 {-# INLINE mapPositions #-}
 mapPositions f = \case
     FlatF flt -> FlatF (flat flt)
-    VariantF l r x -> VariantF (f l) (f r) x
+    VariantF anno l r x -> VariantF anno (f l) (f r) x
     SequenceF anno l xs r -> SequenceF anno (f l) (fmap sequencePart xs) (f r)
     MetaGtF l x r y -> MetaGtF (f l) x (f r) (closePin y)
     ParenF l x r -> ParenF (f l) x (f r)
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF (f l1) x (f r1) (f l2) y (f r2)
   where
     flat = \case
-        Atom l r ->
-            Atom (f l) (f r)
+        Atom anno l r ->
+            Atom anno (f l) (f r)
         Bytes anno (BytesLit l r more) ->
             Bytes anno $ BytesLit (f l) (f r) (moreBytes more)
         Number anno (NumberLit mbSgn l r fpart epart) ->
@@ -312,25 +313,27 @@ mapAnno ::
      ->
         (SequenceAnno anno -> SequenceAnno anno')
      ->
+        (SymbolAnno anno -> SymbolAnno anno')
+     ->
         (TextAnno anno -> TextAnno anno')
      ->
         MatterF anno pos neseq seq a
      ->
         MatterF anno' pos neseq seq a
 {-# INLINE mapAnno #-}
-mapAnno f g h i = \case
+mapAnno fbytes fnum fseq fsym ftext = \case
     FlatF flt -> FlatF (flat flt)
-    VariantF l r x -> VariantF l r x
-    SequenceF anno l xs r -> SequenceF (h anno) l (fmap sequencePart xs) r
+    VariantF anno l r x -> VariantF (fsym anno) l r x
+    SequenceF anno l xs r -> SequenceF (fseq anno) l (fmap sequencePart xs) r
     MetaGtF l x r y -> MetaGtF l x r (closePin y)
     ParenF l x r -> ParenF l x r
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
   where
     flat = \case
-        Atom l r -> Atom l r
-        Bytes anno bytes -> Bytes (f anno) bytes
-        Number anno number -> Number (g anno) number
-        Text anno txt -> Text (i anno) txt
+        Atom anno l r -> Atom (fsym anno) l r
+        Bytes anno bytes -> Bytes (fbytes anno) bytes
+        Number anno number -> Number (fnum anno) number
+        Text anno txt -> Text (ftext anno) txt
 
     sequencePart = \case
         Item x -> Item x

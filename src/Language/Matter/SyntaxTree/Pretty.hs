@@ -42,7 +42,7 @@ pretty =
   where
     phi = \case
         FlatF flt -> prettyFlat flt
-        VariantF _l _r x -> od OdVariant <> x
+        VariantF _anno _l _r x -> od OdVariant <> x
         SequenceF _anno _l xs _r -> sd SdOpenSeq <> foldr (\x acc -> prettySequencePart x <> acc) (sd SdCloseSeq) xs
         MetaGtF _l x _r y ->
             let y' = case y of
@@ -62,7 +62,7 @@ prettySequencePart = \case
 
 prettyFlat :: Foldable neseq => Flat anno pos neseq -> DNonEmpty Token
 prettyFlat = \case
-    Atom _l _r -> od OdAtom
+    Atom _anno _l _r -> od OdAtom
     Bytes _anno (BytesLit _l _r more) -> OdToken OdBytes `consDList` prettyMoreBytes more
     Number _anno (NumberLit mbSign _l _r fractionPart exponentPart) ->
         let x = case fractionPart of

@@ -213,7 +213,7 @@ pathedFmap ::
 {-# INLINE pathedFmap #-}
 pathedFmap inp path f = \case
     FlatF flt -> FlatF flt
-    VariantF l r x -> VariantF l r $ flip f x $ SnocPath path $ VariantTurn $ interpretSymbol inp l r
+    VariantF anno l r x -> VariantF anno l r $ flip f x $ SnocPath path $ VariantTurn $ interpretSymbol inp l r
     SequenceF anno p1 xs p2 -> SequenceF anno p1 (go xs) p2
     MetaGtF p1 x p2 y -> MetaGtF p1 (flip f x $ SnocPath path MetaGtTurn) p2 $ case y of
         NoClosePin y' -> NoClosePin (flip f y' $ SnocPath path ReferentGtTurn)
