@@ -2,15 +2,33 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE PatternSynonyms #-}
 
-module Language.Matter.Interpreter (module Language.Matter.Interpreter) where
+module Language.Matter.Interpreter (
+    -- * Flats
+    interpretSymbol,
+    interpretBytes,
+    interpretBytesLit,
+
+    -- * Paths
+    Path (EmptyPath, SnocPath),
+    Turn (..),
+    TurnX (..),
+    pathLength,
+    pathMap,
+    pathedFmap,
+    pathedFold,
+  ) where
 
 import Control.Monad.ST (runST)
+import Control.Monad.Trans.State qualified as State
 import Data.Bits ((.|.), (.>>.))
+import Data.Map (Map)
+import Data.Map qualified as Map
 import Data.Primitive.ByteArray qualified as BA
 import Data.Text.Internal qualified as TI
 import Data.Text.Short qualified as TS
-import Data.Word (Word8)
+import Data.Word (Word8, Word32)
 import GHC.Exts qualified as GHC
 import GHC.Word qualified as GHC
 
@@ -82,3 +100,159 @@ interpretBytesLit inp l r =
 -- TODO interpretText
 
 -- TODO interpretTextLit
+
+-----
+
+-- | The sequence of turns that reached some subtree of a 'Matter'
+data Path =
+    EmptyPath
+  |
+    RawSnocPath !Path !(Map TurnX Path) !Turn
+  deriving (Eq, Show)
+
+-- | Hides the cached value of 'pathMap'
+pattern SnocPath :: Path -> Turn -> Path
+pattern SnocPath path turn <-
+    RawSnocPath path _m turn
+  where
+    SnocPath path turn = RawSnocPath path (pathMap path) turn
+
+{-# COMPLETE EmptyPath, SnocPath #-}
+
+-- | Each possible turn when descending into a 'Matter' value
+data Turn =
+    -- | #foo A
+    VariantTurn !TS.ShortText
+  |
+    -- | [ ... A ... ], with a count of predecessors (aka index)
+    ItemTurn !Word32 !Word32
+  |
+    -- | {= A =}, with a count of predecessors (aka index)
+    MetaEqTurn !Word32 !Word32
+  |
+    -- | ( A )
+    --
+    -- TODO is this turn useless?
+    ParenTurn
+  |
+    -- | The A of @{> A >} B@
+    MetaGtTurn
+  |
+    -- | The B of @{> A >} B@
+    ReferentGtTurn
+  |
+    -- | The A of @(^ A ) {< B <}@
+    ReferentLtTurn
+  |
+    -- | The B of @(^ A ) {< B <}@
+    MetaLtTurn
+  deriving (Eq, Ord, Show)
+
+-- | Either a specific 'Turn', or a whole family of 'Turns'
+data TurnX =
+    TurnX !Turn
+  |
+    VariantTurnX
+  |
+    ItemTurnX
+  |
+    MetaTurnX
+  |
+    ReferentTurnX
+  deriving (Eq, Ord, Show)
+
+turnX :: Turn -> Maybe TurnX
+{-# INLINE turnX #-}
+turnX = \case
+    VariantTurn{} -> Just VariantTurnX
+    ItemTurn{} -> Just ItemTurnX
+    MetaEqTurn{} -> Just MetaTurnX
+    ParenTurn -> Nothing
+    MetaGtTurn -> Just MetaTurnX
+    ReferentGtTurn -> Just ReferentTurnX
+    ReferentLtTurn -> Just ReferentTurnX
+    MetaLtTurn -> Just MetaTurnX
+
+-- | The deepest predecessor 'Path' that matches the given 'TurnX'
+pathMap :: Path -> Map TurnX Path
+pathMap = \case
+    EmptyPath ->
+        Map.empty
+    RawSnocPath path m turn ->
+        Map.insert (TurnX turn) path
+      $ maybe id (flip Map.insert path) (turnX turn)
+      $ m
+
+-- | The number of turns in the path
+--
+-- Equal to the number of 'SnocPath' constructors.
+--
+-- It is potentially /greater/ than the number of constructors of the
+-- 'Matter' data type, since an occurrence of 'BothPins' also adds its
+-- own 'SnocPath' constructor.
+pathLength :: Path -> Int
+pathLength = Map.size . pathMap
+
+-- | Like 'fmap' but also applies the appropriate 'Turn's to the 'Path'
+--
+-- 'SnocPath' will hav been applied to each position. Note that the
+-- paths to the 'BothPins' arguments involve two additional turns, so
+-- 'SnocPath' has been called twice for each.
+pathedFmap ::
+    (MatterStream inp, Traversable seq)
+ =>
+    inp
+ ->
+    Path
+ ->
+    (Path -> a -> b)
+ ->
+    MatterF anno Pos neseq seq a
+ ->
+    MatterF anno Pos neseq seq b
+{-# INLINE pathedFmap #-}
+pathedFmap inp path f = \case
+    FlatF flt -> FlatF flt
+    VariantF l r x -> VariantF l r $ flip f x $ SnocPath path $ VariantTurn $ interpretSymbol inp l r
+    SequenceF anno p1 xs p2 -> SequenceF anno p1 (go xs) p2
+    MetaGtF p1 x p2 y -> MetaGtF p1 (flip f x $ SnocPath path MetaGtTurn) p2 $ case y of
+        NoClosePin y' -> NoClosePin (flip f y' $ SnocPath path ReferentGtTurn)
+        OnlyClosePin p3 y' p4 -> OnlyClosePin p3 (flip f y' $ SnocPath path ReferentGtTurn) p4
+        BothPins p3 y1 p4 p5 y2 p6->
+            BothPins
+               p3 (flip f y1 $ SnocPath path ReferentGtTurn `SnocPath` ReferentLtTurn) p4
+               p5 (flip f y2 $ SnocPath path ReferentGtTurn `SnocPath` MetaLtTurn    ) p6
+    ParenF p1 x p2 -> ParenF p1 (flip f x $ SnocPath path ParenTurn) p2
+    PinMetaLtF p1 x p2 p3 y p4 ->
+        PinMetaLtF
+           p1 (flip f x $ SnocPath path ReferentLtTurn) p2
+           p3 (flip f y $ SnocPath path MetaLtTurn    ) p4
+  where
+    go xs = traverse sequencePart xs `State.evalState` MkX 0 0
+    sequencePart part = case part of
+        Item x -> (\e -> Item (f e x)) <$> item
+        MetaEQ l x r -> (\e -> MetaEQ l (f e x) r) <$> metaEQ
+    item = State.state $ \(MkX nitem nmeta) -> (path `SnocPath` ItemTurn nitem nmeta, MkX (nitem + 1) nmeta)
+    metaEQ = State.state $ \(MkX nitem nmeta) -> (path `SnocPath` MetaEqTurn nitem nmeta, MkX nitem (nmeta + 1))
+
+-- | NOT EXPORTED
+data X = MkX !Word32 !Word32
+
+-- | Like 'fold' but also applies the appropriate 'Turn's to the 'Path'
+pathedFold ::
+    (MatterStream inp, Traversable seq)
+ =>
+    (Path -> MatterF anno Pos neseq seq a -> a)
+ ->
+    inp
+ ->
+    Path
+ ->
+    Matter anno Pos neseq seq
+ ->
+    a
+{-# INLINE pathedFold #-}
+pathedFold phi inp =
+    go
+  where
+    go !path = phi path . pathedFmap inp path go . project
