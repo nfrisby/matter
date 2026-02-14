@@ -63,8 +63,8 @@ prettySequencePart = \case
 prettyFlat :: Foldable neseq => Flat anno pos neseq -> DNonEmpty Token
 prettyFlat = \case
     Atom _l _r -> od OdAtom
-    Bytes _anno _l _r more -> OdToken OdBytes `consDList` prettyMoreBytes more
-    Number _anno _l _r fractionPart exponentPart ->
+    Bytes _anno (BytesLit _l _r more) -> OdToken OdBytes `consDList` prettyMoreBytes more
+    Number _anno (NumberLit _l _r fractionPart exponentPart) ->
         let x = case fractionPart of
                 NothingFraction -> mempty
                 JustFraction _l _r -> od' OdFractionPart
@@ -78,12 +78,12 @@ prettyFlat = \case
 prettyMoreBytes :: MoreBytes pos -> DList Token
 prettyMoreBytes = \case
     NoMoreBytes -> mempty
-    MoreBytes _p _l _r more -> od' OdOpenJoiner <> sd' SdCloseJoiner <> od' OdBytes <> prettyMoreBytes more
+    MoreBytes _p (BytesLit _l _r more) -> od' OdOpenJoiner <> sd' SdCloseJoiner <> od' OdBytes <> prettyMoreBytes more
 
 prettyText :: Foldable neseq => Text pos neseq -> DNonEmpty Token
 prettyText = \case
     Suppressor _p _p' j txt -> sd SdUnderscore <> od OdOpenJoiner <> prettyJoiner j <> prettyText txt
-    TextLiteral q _l _r more -> prettyQuote q `appendDList` prettyMoreText more
+    TextLit q _l _r more -> prettyQuote q `appendDList` prettyMoreText more
 
 prettyJoiner :: Foldable neseq => Joiner pos neseq j -> DNonEmpty Token
 prettyJoiner = \case

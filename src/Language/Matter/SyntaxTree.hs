@@ -20,7 +20,7 @@ import Language.Matter.Tokenizer.Counting (D10, Four, Four')
 data P = MkP
 
 data Matter anno pos neseq seq =
-    Flat (Flat anno pos neseq)
+    Flat !(Flat anno pos neseq)
   |
     Variant !pos !pos (Matter anno pos neseq seq)
   |
@@ -46,15 +46,11 @@ data ClosePin pos a =
 data Flat anno pos neseq =
     Atom !pos !pos
   |
-    Bytes !(BytesAnno anno) !pos !pos (MoreBytes pos)
+    Bytes !(BytesAnno anno) {-# UNPACK #-} !(Bytes pos)
   |
-    Number !(NumberAnno anno) !pos !pos !(MaybeFraction pos) !(MaybeExponent pos)
+    Number !(NumberAnno anno) {-# UNPACK #-} !(Number pos)
   |
     Text !(TextAnno anno) (Text pos neseq)
-
-data MaybeFraction pos = NothingFraction | JustFraction !pos !pos
-
-data MaybeExponent pos = NothingExponent | JustExponent !pos !pos
 
 data family BytesAnno anno
 data family NumberAnno anno
@@ -62,14 +58,24 @@ data family TextAnno anno
 
 -----
 
-data MoreBytes pos = NoMoreBytes | MoreBytes !pos !pos !pos (MoreBytes pos)
+data Number pos = NumberLit !pos !pos !(MaybeFraction pos) !(MaybeExponent pos)
+
+data MaybeFraction pos = NothingFraction | JustFraction !pos !pos
+
+data MaybeExponent pos = NothingExponent | JustExponent !pos !pos
+
+-----
+
+data Bytes pos = BytesLit !pos !pos (MoreBytes pos)
+
+data MoreBytes pos = NoMoreBytes | MoreBytes !pos !(Bytes pos)
 
 -----
 
 data Text pos neseq =
     forall j. Suppressor !pos !pos (Joiner pos neseq j) (Text pos neseq)
   |
-    TextLiteral !Quote !pos !pos (MoreText pos neseq)
+    TextLit !Quote !pos !pos (MoreText pos neseq)
 
 data Quote =
     DoubleQuote
@@ -111,6 +117,9 @@ deriving instance Show P
 deriving instance (ShowAnno anno, Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos (Matter anno pos neseq seq)))) => Show (Matter anno pos neseq seq)
 deriving instance (Show pos, Show a) => Show (ClosePin pos a)
 deriving instance (ShowAnno anno, Show pos, Show (neseq (Escape pos))) => Show (Flat anno pos neseq)
+deriving instance Show pos => Show (Bytes pos)
+deriving instance Show pos => Show (MoreBytes pos)
+deriving instance Show pos => Show (Number pos)
 deriving instance Show pos => Show (MaybeFraction pos)
 deriving instance Show pos => Show (MaybeExponent pos)
 deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Text pos neseq)
@@ -118,18 +127,20 @@ deriving instance Show Quote
 deriving instance (Show pos, Show (neseq (Escape pos))) => Show (MoreText pos neseq)
 deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Joiner pos neseq j)
 deriving instance Show pos => Show (Escape pos)
-deriving instance Show pos => Show (MoreBytes pos)
 deriving instance (Show pos, Show a) => Show (SequencePart pos a)
 
 deriving instance Eq P
 deriving instance (EqAnno anno, Eq pos, Eq (neseq (Escape pos)), Eq (seq (SequencePart pos (Matter anno pos neseq seq)))) => Eq (Matter anno pos neseq seq)
 deriving instance (Eq pos, Eq a) => Eq (ClosePin pos a)
 deriving instance (EqAnno anno, Eq pos, Eq (neseq (Escape pos))) => Eq (Flat anno pos neseq)
+deriving instance Eq pos => Eq (Bytes pos)
+deriving instance Eq pos => Eq (MoreBytes pos)
+deriving instance Eq pos => Eq (Number pos)
 deriving instance Eq pos => Eq (MaybeFraction pos)
 deriving instance Eq pos => Eq (MaybeExponent pos)
 instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Text pos neseq) where
     Suppressor p1 p1' j1 txt1 == Suppressor p2 p2' j2 txt2 = p1 == p2 && p1' == p2' && joinerEquality j1 j2 && txt1 == txt2
-    TextLiteral q1 l1 r1 more1 == TextLiteral q2 l2 r2 more2 = q1 == q2 && l1 == l2 && r1 == r2 && more1 == more2
+    TextLit q1 l1 r1 more1 == TextLit q2 l2 r2 more2 = q1 == q2 && l1 == l2 && r1 == r2 && more1 == more2
     _ == _ = False
 deriving instance Eq Quote
 instance (Eq pos, Eq (neseq (Escape pos))) => Eq (MoreText pos neseq) where
@@ -138,7 +149,6 @@ instance (Eq pos, Eq (neseq (Escape pos))) => Eq (MoreText pos neseq) where
     _ == _ = False
 deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Joiner pos neseq j)
 deriving instance Eq pos => Eq (Escape pos)
-deriving instance Eq pos => Eq (MoreBytes pos)
 deriving instance (Eq pos, Eq a) => Eq (SequencePart pos a)
 
 deriving instance Functor (ClosePin pos)
@@ -246,14 +256,18 @@ mapPositions f = \case
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF (f l1) x (f r1) (f l2) y (f r2)
   where
     flat = \case
-        Atom l r -> Atom (f l) (f r)
-        Bytes anno l r more -> Bytes anno (f l) (f r) (moreBytes more)
-        Number anno l r fpart epart -> Number anno (f l) (f r) (fractionPart fpart) (exponentPart epart)
-        Text anno txt -> Text anno (text txt)
+        Atom l r ->
+            Atom (f l) (f r)
+        Bytes anno (BytesLit l r more) ->
+            Bytes anno $ BytesLit (f l) (f r) (moreBytes more)
+        Number anno (NumberLit l r fpart epart) ->
+            Number anno $ NumberLit (f l) (f r) (fractionPart fpart) (exponentPart epart)
+        Text anno txt ->
+            Text anno (text txt)
 
     moreBytes = \case
         NoMoreBytes -> NoMoreBytes
-        MoreBytes p l r more -> MoreBytes (f p) (f l) (f r) (moreBytes more)
+        MoreBytes p (BytesLit l r more) -> MoreBytes (f p) $ BytesLit (f l) (f r) (moreBytes more)
 
     fractionPart = \case
         NothingFraction -> NothingFraction
@@ -265,7 +279,7 @@ mapPositions f = \case
 
     text = \case
         Suppressor p1 p2 j txt -> Suppressor (f p1) (f p2) (joiner j) (text txt)
-        TextLiteral q l r more -> TextLiteral q (f l) (f r) (moreText more)
+        TextLit q l r more -> TextLit q (f l) (f r) (moreText more)
 
     joiner :: Joiner pos neseq j -> Joiner pos' neseq j
     joiner = \case
@@ -314,8 +328,8 @@ mapAnno f g h i = \case
   where
     flat = \case
         Atom l r -> Atom l r
-        Bytes anno l r more -> Bytes (f anno) l r more
-        Number anno l r fpart epart -> Number (g anno) l r fpart epart
+        Bytes anno bytes -> Bytes (f anno) bytes
+        Number anno number -> Number (g anno) number
         Text anno txt -> Text (i anno) txt
 
     sequencePart = \case

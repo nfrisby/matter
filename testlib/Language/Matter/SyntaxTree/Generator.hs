@@ -96,7 +96,7 @@ generateAtom =
 generateNumber :: QC.Gen (Flat A P NonEmpty)
 generateNumber =
     QC.sized $ \sz ->
-        fmap (uncurry (Number MkNumberA MkP MkP))
+        fmap (\(fpart, epart) -> Number MkNumberA $ NumberLit MkP MkP fpart epart)
       $ case compare sz 2 of
             LT -> pure (NothingFraction, NothingExponent)
             EQ -> oneof $ pure (JustFraction MkP MkP, NothingExponent) NE.:| [pure (NothingFraction, JustExponent MkP MkP)]
@@ -105,7 +105,7 @@ generateNumber =
 generateBytes :: QC.Gen (Flat A P NonEmpty)
 generateBytes =
     QC.sized $ \sz ->
-        pure $ Bytes MkBytesA MkP MkP $ foldr ($) NoMoreBytes $ replicate (max 1 sz - 1) $ MoreBytes MkP MkP MkP
+        pure $ Bytes MkBytesA $ BytesLit MkP MkP $ foldr ($) NoMoreBytes $ replicate (max 1 sz - 1) $ MoreBytes MkP . BytesLit MkP MkP
 
 generateText :: QC.Gen (Flat A P NonEmpty)
 generateText = Text MkTextA <$> generateText'
@@ -123,7 +123,7 @@ generateText' =
               $ []
 
     lit more =
-        generateQuote <&> \q -> TextLiteral q MkP MkP more
+        generateQuote <&> \q -> TextLit q MkP MkP more
 
     moreText =
         QC.sized $ \sz ->
@@ -237,13 +237,13 @@ shrinkMatter = \case
   where
     flat = \case
         Atom{} -> []
-        Bytes _anno _l _r NoMoreBytes -> []
-        Bytes _anno _l _r (MoreBytes _p l r more) -> [Bytes MkBytesA l r more]
-        Number _anno l r fpart epart -> case (fpart, epart) of
+        Bytes _anno (BytesLit _l _r NoMoreBytes) -> []
+        Bytes _anno (BytesLit _l _r (MoreBytes _p (BytesLit l r more))) -> [Bytes MkBytesA $ BytesLit l r more]
+        Number _anno (NumberLit l r fpart epart) -> map (Number MkNumberA) $ case (fpart, epart) of
             (NothingFraction, NothingExponent) -> []
-            (JustFraction{}, NothingExponent) -> [Number MkNumberA l r NothingFraction epart]
-            (NothingFraction, JustExponent{}) -> [Number MkNumberA l r fpart NothingExponent]
-            (JustFraction{}, JustExponent{}) -> [Number MkNumberA l r fpart NothingExponent, Number MkNumberA l r NothingFraction epart]
+            (JustFraction{}, NothingExponent) -> [NumberLit l r NothingFraction epart]
+            (NothingFraction, JustExponent{}) -> [NumberLit l r fpart NothingExponent]
+            (JustFraction{}, JustExponent{}) -> [NumberLit l r fpart NothingExponent, NumberLit l r NothingFraction epart]
         Text{} -> []
 
     sequencePart = \case

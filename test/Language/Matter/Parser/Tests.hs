@@ -120,7 +120,7 @@ testCases = [
   , MkRoundTrip 0 $ Flat $ Text G.MkTextA
       $ Suppressor MkP MkP
             (ConsJoinerEscapes (MkEscape MkP Four1 NE.:| [MkEscape MkP Four1]) $ NilJoiner MkP)
-      $ TextLiteral DoubleQuote MkP MkP
+      $ TextLit DoubleQuote MkP MkP
       $ NoMoreText
 
   , passing "_<%25%C398>\"\""
@@ -128,21 +128,21 @@ testCases = [
   , MkRoundTrip 0 $ Flat $ Text G.MkTextA
       $ Suppressor MkP MkP
           (ConsJoinerEscapes (MkEscape MkP Four2 NE.:| [MkEscape MkP Four1]) (NilJoiner MkP))
-      $ TextLiteral DoubleQuote MkP MkP
+      $ TextLit DoubleQuote MkP MkP
       $ NoMoreText
 
     -- BytesAnno
 
   , passingAnd "0x" $ \case
-        Flat (Bytes anno _l _r _more) -> P.bytesAnnoSize anno == 0
+        Flat (Bytes anno _) -> P.bytesAnnoSize anno == 0
         _ -> False
 
   , passingAnd "0x11223344556677" $ \case
-        Flat (Bytes anno _l _r _more) -> P.bytesAnnoSize anno  == 7
+        Flat (Bytes anno _) -> P.bytesAnnoSize anno  == 7
         _ -> False
 
   , passingAnd "0x11 <> 0x2233 <> 0x <> 0x44" $ \case
-        Flat (Bytes anno _l _r _more) -> P.bytesAnnoSize anno  == 4
+        Flat (Bytes anno _) -> P.bytesAnnoSize anno  == 4
         _ -> False
 
     -- TextAnno

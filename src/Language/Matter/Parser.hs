@@ -226,9 +226,9 @@ snoc l r = curry $ \case
     (Flat (IntegerPart l1 r1) stk, OdToken OdFractionPart) ->
         Just $ Flat (FractionPart l r $ IntegerPart l1 r1) stk
     (Flat (FractionPart l2 r2 (IntegerPart l1 r1)) stk, OdToken OdExponentPart) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent l r)
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent l r)
     (Flat (IntegerPart l1 r1) stk, OdToken OdExponentPart) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno l1 r1 ST.NothingFraction (ST.JustExponent l r)
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit l1 r1 ST.NothingFraction (ST.JustExponent l r)
 
     (_stk, OdToken OdFractionPart) -> Nothing
     (_stk, OdToken OdExponentPart) -> Nothing
@@ -445,8 +445,8 @@ pop = \case
     
 popFlat :: MatterParse a => Flat x -> Maybe a
 popFlat = \case
-    IntegerPart l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno l r ST.NothingFraction ST.NothingExponent
-    FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
+    IntegerPart l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit l r ST.NothingFraction ST.NothingExponent
+    FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
     Suppressor{} -> Nothing
     x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ uncurry (ST.Text . finalizeTA) $ popT mempty ST.NoMoreText x
     OpenTextJoiner{} -> Nothing
@@ -468,10 +468,10 @@ finalizeTA (MkTA x) = MkTextAnno x
 
 popT :: TA -> ST.MoreText Pos NonEmpty -> Flat T -> (TA, ST.Text Pos NonEmpty)
 popT !anno acc = \case
-    Text q l r -> (textAnno anno (Just q) l r, ST.TextLiteral q l r acc)
+    Text q l r -> (textAnno anno (Just q) l r, ST.TextLit q l r acc)
     MoreText q l r (CloseTextJoiner p fstk) -> case popSomeJo (ST.NilJoiner p) fstk of
         PoppedTextJoiner janno jp j fstk' ->
-            popUT janno jp j (textAnno anno (Just q) l r) (ST.TextLiteral q l r acc) fstk'
+            popUT janno jp j (textAnno anno (Just q) l r) (ST.TextLit q l r acc) fstk'
 
 textAnno :: TA -> Maybe ST.Quote -> Pos -> Pos -> TA
 textAnno (MkTA acc) mbQ (MkPos x y) pos =
@@ -525,8 +525,9 @@ popJoJt !janno j = \case
 
 popBytes :: Word32 -> ST.MoreBytes Pos -> Flat B -> ST.Flat Anno Pos NonEmpty
 popBytes !anno acc = \case
-    Bytes l r -> ST.Bytes (MkBytesAnno (anno + b l r)) l r acc
-    MoreBytes l r (CloseBytesJoiner _r (OpenBytesJoiner p fstk)) -> popBytes (anno + b l r) (ST.MoreBytes p l r acc) fstk
+    Bytes l r -> ST.Bytes (MkBytesAnno (anno + b l r)) $ ST.BytesLit l r acc
+    MoreBytes l r (CloseBytesJoiner _r (OpenBytesJoiner p fstk)) ->
+        popBytes (anno + b l r) (ST.MoreBytes p $ ST.BytesLit l r acc) fstk
   where
     b l r = div (T.posDiff r l - 2 {- 0x -}) 2 {- 2 nibbles per byte -}
 
