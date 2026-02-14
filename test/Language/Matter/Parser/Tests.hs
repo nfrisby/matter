@@ -131,23 +131,41 @@ testCases = [
       $ TextLiteral DoubleQuote MkP MkP
       $ NoMoreText
 
+  , passingAnd "0x" $ \case
+        Flat (Bytes anno _l _r _more) -> P.bytesAnnoSize anno == 0
+        _ -> False
+
+  , passingAnd "0x11223344556677" $ \case
+        Flat (Bytes anno _l _r _more) -> P.bytesAnnoSize anno  == 7
+        _ -> False
+
+  , passingAnd "0x11 <> 0x2233 <> 0x <> 0x44" $ \case
+        Flat (Bytes anno _l _r _more) -> P.bytesAnnoSize anno  == 4
+        _ -> False
   ]
 
 data TestCase =
-    MkTestCase String Bool
+    MkTestCase String (ParseResult -> Bool)
   |
     MkRoundTrip Int (Matter A P NonEmpty [])
 
 failing :: String -> TestCase
-failing s = MkTestCase s False
+failing s = MkTestCase s (const False)
 
 passing :: String -> TestCase
-passing s = MkTestCase s True
+passing s = MkTestCase s (const True)
+
+passingAnd :: String  -> (M -> Bool) -> TestCase
+passingAnd s f = MkTestCase s $ \case
+    ParseDone m -> f m
+    ParseStuck{} -> False
+    TokenizerError{} -> False
 
 doesItPass :: TestCase -> IO Bool
 doesItPass = \case
-    MkTestCase s expected -> do
+    MkTestCase s mkExpected -> do
         let x = parseWhole s
+            expected = mkExpected x
         let (itPasses, prefix, extra) = case x of
                 ParseDone{} -> (expected, if expected then "PASS " else "FAIL ", "")
                 ParseStuck _ _ _ stk -> (not expected, if expected then "FAIL " else "PASS ", show (P.simplify stk))

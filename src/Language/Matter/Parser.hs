@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -14,10 +15,11 @@
 
 module Language.Matter.Parser (
     Anno,
-    ST.BytesAnno (MkBytesAnno),
-    ST.NumberAnno (MkNumberAnno),
-    ST.TextAnno (MkTextAnno),
+    ST.BytesAnno,
+    ST.NumberAnno,
+    ST.TextAnno,
     MatterParse (..),
+    bytesAnnoSize,
 
     Stk,
     emptyStk,
@@ -35,6 +37,7 @@ module Language.Matter.Parser (
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
 import Data.Kind (Type)
+import Data.Word (Word32)
 import GHC.Show (showSpace)
 import Language.Matter.Tokenizer (OdToken (..), Pos (..), SdToken (..), Token (..))
 import Language.Matter.Tokenizer qualified as T
@@ -43,18 +46,20 @@ import Language.Matter.SyntaxTree qualified as ST
 data Anno
 
 data instance ST.BytesAnno Anno =
-    -- | How many bytes
-    MkBytesAnno -- !Word32
+    MkBytesAnno !Word32
   deriving (Eq, Show)
 
+-- | How many bytes total, after all the joining
+bytesAnnoSize :: ST.BytesAnno Anno -> Word32
+bytesAnnoSize (MkBytesAnno n) = n
+
+-- | TODO digit counts
 data instance ST.NumberAnno Anno =
-    -- | TODO
     MkNumberAnno
   deriving (Eq, Show)
 
 data instance ST.TextAnno Anno =
-    -- | Counts after reducing all the joiners
-    MkTextAnno -- !Pos
+    MkTextAnno
   deriving (Eq, Show)
 
 instance ST.ShowAnno Anno
@@ -427,10 +432,10 @@ popFlat = \case
     CloseTextJoiner{} -> Nothing
     MoreSuppressor{} -> Nothing
     x@MoreText{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text MkTextAnno $ popT ST.NoMoreText x
-    x@Bytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes ST.NoMoreBytes x
+    x@Bytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes 0 ST.NoMoreBytes x
     OpenBytesJoiner{} -> Nothing
     CloseBytesJoiner{} -> Nothing
-    x@MoreBytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes ST.NoMoreBytes x
+    x@MoreBytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes 0 ST.NoMoreBytes x
 
 popT :: ST.MoreText Pos NonEmpty -> Flat T -> ST.Text Pos NonEmpty
 popT acc = \case
@@ -466,10 +471,12 @@ popJoJt j = \case
     OpenTextJoiner p fstk -> PoppedTextJoiner p j fstk
     JoinerText l r fstk -> popJoJe (ST.ConsJoinerText l r j) fstk
 
-popBytes :: ST.MoreBytes Pos -> Flat B -> ST.Flat Anno Pos NonEmpty
-popBytes acc = \case
-    Bytes l r -> ST.Bytes MkBytesAnno l r acc
-    MoreBytes l r (CloseBytesJoiner _r (OpenBytesJoiner p fstk)) -> popBytes (ST.MoreBytes p l r acc) fstk   -- TODO
+popBytes :: Word32 -> ST.MoreBytes Pos -> Flat B -> ST.Flat Anno Pos NonEmpty
+popBytes !anno acc = \case
+    Bytes l r -> ST.Bytes (MkBytesAnno (anno + b l r)) l r acc
+    MoreBytes l r (CloseBytesJoiner _r (OpenBytesJoiner p fstk)) -> popBytes (anno + b l r) (ST.MoreBytes p l r acc) fstk
+  where
+    b l r = div (T.posDiff r l - 2 {- 0x -}) 2 {- 2 nibbles per byte -}
 
 -----
 
