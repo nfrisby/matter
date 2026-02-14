@@ -131,6 +131,8 @@ testCases = [
       $ TextLiteral DoubleQuote MkP MkP
       $ NoMoreText
 
+    -- BytesAnno
+
   , passingAnd "0x" $ \case
         Flat (Bytes anno _l _r _more) -> P.bytesAnnoSize anno == 0
         _ -> False
@@ -142,6 +144,73 @@ testCases = [
   , passingAnd "0x11 <> 0x2233 <> 0x <> 0x44" $ \case
         Flat (Bytes anno _l _r _more) -> P.bytesAnnoSize anno  == 4
         _ -> False
+
+    -- TextAnno
+
+  , passingAnd "\"\"" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
+        _ -> False
+
+  , passingAnd "'0''0'" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
+        _ -> False
+
+  , passingAnd "'7''7'" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
+        _ -> False
+
+  , passingAnd "'23''23'" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
+        _ -> False
+
+  , passingAnd "'931''931'" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
+        _ -> False
+
+  , passingAnd "'8832''8832'" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
+        _ -> False
+
+  , passingAnd "'8832'Banana'8832'" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 6 6
+        _ -> False
+
+  , passingAnd "\"\" <banana> \"\"" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 6 6
+        _ -> False
+
+  , passingAnd "\"\" <%F09F8D8C> \"\"" $ \case   -- ie 🍌
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 1 4
+        _ -> False
+
+  , passingAnd "\"\" <> \"euro\"" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 4 4
+        _ -> False
+
+  , passingAnd "\"\" <%e282ac> \"\"" $ \case   -- ie €
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 1 3
+        _ -> False
+
+  , passingAnd "\"\" <%F09F8D8C> \"€\"" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 2 7
+        _ -> False
+
+  , passingAnd "_ <%F09F8D8C> \"€\"" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 1 3
+        _ -> False
+
+  , passingAnd "\"\" <%e282ac> \"🍌\"" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 2 7
+        _ -> False
+
+  , passingAnd "_ <%e282ac> \"🍌\"" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 1 4
+        _ -> False
+
+  , passingAnd "\"€\" <> _ <banana> \"🍌\"" $ \case
+        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 2 7
+        _ -> False
+
   ]
 
 data TestCase =

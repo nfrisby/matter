@@ -3,10 +3,10 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -20,6 +20,7 @@ module Language.Matter.Parser (
     ST.TextAnno,
     MatterParse (..),
     bytesAnnoSize,
+    textAnnoCounts,
 
     Stk,
     emptyStk,
@@ -41,6 +42,7 @@ import Data.Word (Word32)
 import GHC.Show (showSpace)
 import Language.Matter.Tokenizer (OdToken (..), Pos (..), SdToken (..), Token (..))
 import Language.Matter.Tokenizer qualified as T
+import Language.Matter.Tokenizer.Counting (forgetFour', valueFour)
 import Language.Matter.SyntaxTree qualified as ST
 
 data Anno
@@ -59,8 +61,12 @@ data instance ST.NumberAnno Anno =
   deriving (Eq, Show)
 
 data instance ST.TextAnno Anno =
-    MkTextAnno
+    MkTextAnno !Pos
   deriving (Eq, Show)
+
+-- | The total counts, after all the joining
+textAnnoCounts :: ST.TextAnno Anno -> Pos
+textAnnoCounts (MkTextAnno pos) = pos
 
 instance ST.ShowAnno Anno
 instance ST.EqAnno Anno
@@ -425,51 +431,80 @@ popFlat = \case
     IntegerPart l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno l r ST.NothingFraction ST.NothingExponent
     FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
     Suppressor{} -> Nothing
-    x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text MkTextAnno $ popT ST.NoMoreText x
+    x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ uncurry (ST.Text . finalizeTA) $ popT mempty ST.NoMoreText x
     OpenTextJoiner{} -> Nothing
     JoinerText{} -> Nothing
     Escapes{} -> Nothing
     CloseTextJoiner{} -> Nothing
     MoreSuppressor{} -> Nothing
-    x@MoreText{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text MkTextAnno $ popT ST.NoMoreText x
+    x@MoreText{} -> Just $ parseAlgebra $ ST.FlatF $ uncurry (ST.Text . finalizeTA) $ popT mempty ST.NoMoreText x
     x@Bytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes 0 ST.NoMoreBytes x
     OpenBytesJoiner{} -> Nothing
     CloseBytesJoiner{} -> Nothing
     x@MoreBytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes 0 ST.NoMoreBytes x
 
-popT :: ST.MoreText Pos NonEmpty -> Flat T -> ST.Text Pos NonEmpty
-popT acc = \case
-    Text q l r -> ST.TextLiteral q l r acc
+newtype TA = MkTA Pos
+  deriving (Monoid, Semigroup)
+
+finalizeTA :: TA -> ST.TextAnno Anno
+finalizeTA (MkTA x) = MkTextAnno x
+
+popT :: TA -> ST.MoreText Pos NonEmpty -> Flat T -> (TA, ST.Text Pos NonEmpty)
+popT !anno acc = \case
+    Text q l r -> (textAnno anno (Just q) l r, ST.TextLiteral q l r acc)
     MoreText q l r (CloseTextJoiner p fstk) -> case popSomeJo (ST.NilJoiner p) fstk of
-        PoppedTextJoiner jp j fstk' -> popUT jp j (ST.TextLiteral q l r acc) fstk'
+        PoppedTextJoiner janno jp j fstk' ->
+            popUT janno jp j (textAnno anno (Just q) l r) (ST.TextLiteral q l r acc) fstk'
+
+textAnno :: TA -> Maybe ST.Quote -> Pos -> Pos -> TA
+textAnno (MkTA acc) mbQ (MkPos x y) pos =
+    MkTA $ (MkPos (negate x) (negate y) <> pos) <> nudge <> acc
+  where
+    -- All of the characters in the delimiter are ASCII, so 1 code
+    -- point and also 1 byte.
+    nudge = case mbQ of
+        Nothing -> mempty
+        Just ST.DoubleQuote ->
+            MkPos (negate 1) (negate 1)   -- ie 2 * 1 - 1
+        Just (ST.MultiQuote delim) ->
+            let n = 2 * (valueFour (forgetFour' delim) + 2) - 1
+            in
+            MkPos (negate n) (negate n)
 
 data PoppedTextJoiner where
-    PoppedTextJoiner :: SingI (UT x) => !Pos -> !(ST.Joiner Pos NonEmpty j) -> !(Flat x) -> PoppedTextJoiner
+    PoppedTextJoiner :: SingI (UT x) => !TA -> !Pos -> !(ST.Joiner Pos NonEmpty j) -> !(Flat x) -> PoppedTextJoiner
 
-popUT :: SingI (UT x) => Pos -> ST.Joiner Pos NonEmpty j -> ST.Text Pos NonEmpty -> Flat x -> ST.Text Pos NonEmpty
-popUT jp j acc fstk = case (utOf fstk, fstk) of
+popUT :: SingI (UT x) => TA -> Pos -> ST.Joiner Pos NonEmpty j -> TA -> ST.Text Pos NonEmpty -> Flat x -> (TA, ST.Text Pos NonEmpty)
+popUT !janno jp j !anno acc fstk = case (utOf fstk, fstk) of
 
-    (SingU, Suppressor p) -> ST.Suppressor p jp j acc
+    (SingU, Suppressor p) -> (anno, ST.Suppressor p jp j acc)
     (SingU, MoreSuppressor p2 (CloseTextJoiner p1 fstk')) -> case popSomeJo (ST.NilJoiner p1) fstk' of
-        PoppedTextJoiner jp' j' fstk'' -> popUT jp' j' (ST.Suppressor p2 jp j acc) fstk''
+        PoppedTextJoiner janno' jp' j' fstk'' ->
+            popUT janno' jp' j' anno (ST.Suppressor p2 jp j acc) fstk''
 
-    (SingT, fstk') -> popT  (ST.MoreText jp j acc) fstk'
+    (SingT, fstk') -> popT (janno <> anno) (ST.MoreText jp j acc) fstk'
 
-popSomeJo :: (forall j'. ST.Joiner Pos NonEmpty j') -> Flat (Jo j) -> PoppedTextJoiner
+popSomeJo :: ST.Joiner Pos NonEmpty j -> Flat (Jo j) -> PoppedTextJoiner
 popSomeJo j = \case
-    OpenTextJoiner p fstk -> PoppedTextJoiner p j fstk
-    JoinerText l r fstk -> popJoJe (ST.ConsJoinerText l r j) fstk
-    Escapes escapes fstk -> popJoJt (ST.ConsJoinerEscapes (NE.reverse escapes) j) fstk
+    OpenTextJoiner p fstk -> PoppedTextJoiner mempty p j fstk
+    fstk@JoinerText{} -> popJoJt mempty j fstk
+    fstk@Escapes{} -> popJoJe mempty j fstk
 
-popJoJe :: ST.Joiner Pos NonEmpty ST.Je -> Flat (Jo ST.Je) -> PoppedTextJoiner
-popJoJe j = \case
-    OpenTextJoiner p fstk -> PoppedTextJoiner p j fstk
-    Escapes escapes fstk -> popJoJt (ST.ConsJoinerEscapes (NE.reverse escapes) j) fstk
+popJoJe :: TA -> ST.Joiner Pos NonEmpty ST.Je -> Flat (Jo ST.Je) -> PoppedTextJoiner
+popJoJe !janno j = \case
+    OpenTextJoiner p fstk -> PoppedTextJoiner janno p j fstk
+    Escapes escapes fstk -> popJoJt (escapesAnno janno escapes) (ST.ConsJoinerEscapes (NE.reverse escapes) j) fstk
 
-popJoJt :: ST.Joiner Pos NonEmpty ST.Jt -> Flat (Jo ST.Jt) -> PoppedTextJoiner
-popJoJt j = \case
-    OpenTextJoiner p fstk -> PoppedTextJoiner p j fstk
-    JoinerText l r fstk -> popJoJe (ST.ConsJoinerText l r j) fstk
+escapesAnno :: TA -> NonEmpty (ST.Escape Pos) -> TA
+escapesAnno (MkTA acc) escapes =
+    MkTA $ acc <> foldMap f escapes
+  where
+    f (ST.MkEscape _pos sz) = MkPos {codePoints = 1, utf8Bytes = valueFour sz}
+
+popJoJt :: TA -> ST.Joiner Pos NonEmpty ST.Jt -> Flat (Jo ST.Jt) -> PoppedTextJoiner
+popJoJt !janno j = \case
+    OpenTextJoiner p fstk -> PoppedTextJoiner janno p j fstk
+    JoinerText l r fstk -> popJoJe (textAnno janno Nothing l r) (ST.ConsJoinerText l r j) fstk
 
 popBytes :: Word32 -> ST.MoreBytes Pos -> Flat B -> ST.Flat Anno Pos NonEmpty
 popBytes !anno acc = \case

@@ -11,6 +11,7 @@ module Language.Matter.Tokenizer.Counting (
     Four (..),
     Four' (..),
     Five (..),
+    forgetFour',
     valueFour,
 
     -- * Groups of characters
@@ -43,6 +44,13 @@ valueFour = \case
     Four2 -> 2
     Four3 -> 3
     Four4 -> 4
+
+forgetFour' :: Four' a -> Four
+forgetFour' = \case
+    Four1'{} -> Four1
+    Four2'{} -> Four2
+    Four3'{} -> Four3
+    Four4'{} -> Four4
 
 data Maybe' a = Nothing' | Just' !a
 
