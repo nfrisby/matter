@@ -7,6 +7,7 @@ module Language.Matter.SyntaxTree.Generator (
     module Language.Matter.SyntaxTree.Generator,
     BytesAnno (MkBytesA),
     NumberAnno (MkNumberA),
+    SequenceAnno (MkSequenceA),
     TextAnno (MkTextA),
   ) where
 
@@ -24,6 +25,7 @@ data A
 
 data instance BytesAnno A = MkBytesA deriving (Eq, Show)
 data instance NumberAnno A = MkNumberA deriving (Eq, Show)
+data instance SequenceAnno A = MkSequenceA deriving (Eq, Show)
 data instance TextAnno A = MkTextA deriving (Eq, Show)
 
 instance ShowAnno A
@@ -56,7 +58,7 @@ sizeParts sz = do
 generateMatter :: QC.Gen (Matter A P NonEmpty [])
 generateMatter =
     QC.sized $ \sz ->
-        if sz < 1 then pure (Sequence MkP [] MkP) else   -- the smallest visual /obvious/ option
+        if sz < 1 then pure (Sequence MkSequenceA MkP [] MkP) else   -- the smallest visual /obvious/ option
         frequency $
             (  ( 5,          generateSequence )            NE.:|)
 
@@ -77,7 +79,7 @@ generateSequence =
     QC.sized $ \sz -> do
         szs <- sizeParts $ max 1 sz - 1
         xs <- mapM (flip QC.resize generateSequencePart) szs
-        pure $ Sequence MkP xs MkP
+        pure $ Sequence MkSequenceA MkP xs MkP
 
 generateSequencePart :: QC.Gen (SequencePart P (Matter A P NonEmpty []))
 generateSequencePart =
@@ -223,8 +225,8 @@ shrinkMatter :: Matter A pos neseq [] -> [Matter A pos neseq []]
 shrinkMatter = \case
     Flat flt -> map Flat $ flat flt
     Variant l r x -> x  : [Variant l r x' | x' <- shrinkMatter x]
-    Sequence l xs r ->
-        (case xs of [Item x] -> (x :); [MetaEQ _l x _r] -> (x :); _ -> id) $ [ Sequence l xs' r | xs' <- shrinkList sequencePart xs ]
+    Sequence _anno l xs r ->
+        (case xs of [Item x] -> (x :); [MetaEQ _l x _r] -> (x :); _ -> id) $ [ Sequence MkSequenceA l xs' r | xs' <- shrinkList sequencePart xs ]
     MetaGT _l x _r y -> x : case y of
         NoClosePin y1 -> [y1]
         OnlyClosePin _l1 y1 _r1 -> [y1]

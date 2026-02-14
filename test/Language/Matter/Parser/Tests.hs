@@ -312,7 +312,10 @@ prop_prettyThenParseIsSame' (g, m) =
           $ QC.counterexample "TokenizerError"
           $ QC.property False
   where
-    forget = fold $ embed . mapPositions (\_ -> MkP) . mapAnno (\_ -> G.MkBytesA) (\_ -> G.MkNumberA) (\_ -> G.MkTextA)
+    forget =
+        fold $ embed
+             . mapPositions (\_ -> MkP)
+             . mapAnno (\_ -> G.MkBytesA) (\_ -> G.MkNumberA) (\_ -> G.MkSequenceA) (\_ -> G.MkTextA)
 
     txt =
         runStateGen_ (mkStdGen g)

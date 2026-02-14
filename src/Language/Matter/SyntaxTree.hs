@@ -24,13 +24,15 @@ data Matter anno pos neseq seq =
   |
     Variant !pos !pos (Matter anno pos neseq seq)
   |
-    Sequence !pos (seq (SequencePart pos (Matter anno pos neseq seq))) !pos
+    Sequence !(SequenceAnno anno) !pos (seq (SequencePart pos (Matter anno pos neseq seq))) !pos
   |
     MetaGT !pos (Matter anno pos neseq seq) !pos !(ClosePin pos (Matter anno pos neseq seq))
   |
     Paren !pos (Matter anno pos neseq seq) !pos
   |
     PinMetaLT !pos (Matter anno pos neseq seq) !pos !pos (Matter anno pos neseq seq) !pos
+
+data family SequenceAnno anno
 
 data ClosePin pos a =
     NoClosePin a
@@ -57,9 +59,6 @@ data MaybeExponent pos = NothingExponent | JustExponent !pos !pos
 data family BytesAnno anno
 data family NumberAnno anno
 data family TextAnno anno
-
-class (Show (BytesAnno anno), Show (NumberAnno anno), Show (TextAnno anno)) => ShowAnno anno
-class (Eq (BytesAnno anno), Eq (NumberAnno anno), Eq (TextAnno anno)) => EqAnno anno
 
 -----
 
@@ -104,6 +103,9 @@ data SequencePart pos a =
     MetaEQ !pos a !pos
 
 -----
+
+class (Show (BytesAnno anno), Show (NumberAnno anno), Show (SequenceAnno anno), Show (TextAnno anno)) => ShowAnno anno
+class (Eq (BytesAnno anno), Eq (NumberAnno anno), Eq (SequenceAnno anno), Eq (TextAnno anno)) => EqAnno anno
 
 deriving instance Show P
 deriving instance (ShowAnno anno, Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos (Matter anno pos neseq seq)))) => Show (Matter anno pos neseq seq)
@@ -165,7 +167,7 @@ data MatterF anno pos neseq seq a =
   |
     VariantF !pos !pos a
   |
-    SequenceF !pos (seq (SequencePart pos a)) !pos
+    SequenceF !(SequenceAnno anno) !pos (seq (SequencePart pos a)) !pos
   |
     MetaGtF !pos a !pos !(ClosePin pos a)
   |
@@ -181,7 +183,7 @@ project :: Matter anno pos neseq seq -> MatterF anno pos neseq seq (Matter anno 
 project = \case
     Flat flt -> FlatF flt
     Variant l r x -> VariantF l r x
-    Sequence l xs r -> SequenceF l xs r
+    Sequence anno l xs r -> SequenceF anno l xs r
     MetaGT l x r y -> MetaGtF l x r y
     Paren l x r -> ParenF l x r
     PinMetaLT l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
@@ -192,7 +194,7 @@ embed :: MatterF anno pos neseq seq (Matter anno pos neseq seq) -> Matter anno p
 embed = \case
     FlatF flt -> Flat flt
     VariantF l r x -> Variant l r x
-    SequenceF l xs r -> Sequence l xs r
+    SequenceF anno l xs r -> Sequence anno l xs r
     MetaGtF l x r y -> MetaGT l x r y
     ParenF l x r -> Paren l x r
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLT l1 x r1 l2 y r2
@@ -220,7 +222,7 @@ mapSequence ::
 mapSequence f = \case
     FlatF flt -> FlatF flt
     VariantF l r x -> VariantF l r x
-    SequenceF l xs r -> SequenceF l (f xs) r
+    SequenceF anno l xs r -> SequenceF anno l (f xs) r
     MetaGtF l x r y -> MetaGtF l x r y
     ParenF l x r -> ParenF l x r
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
@@ -238,7 +240,7 @@ mapPositions ::
 mapPositions f = \case
     FlatF flt -> FlatF (flat flt)
     VariantF l r x -> VariantF (f l) (f r) x
-    SequenceF l xs r -> SequenceF (f l) (fmap sequencePart xs) (f r)
+    SequenceF anno l xs r -> SequenceF anno (f l) (fmap sequencePart xs) (f r)
     MetaGtF l x r y -> MetaGtF (f l) x (f r) (closePin y)
     ParenF l x r -> ParenF (f l) x (f r)
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF (f l1) x (f r1) (f l2) y (f r2)
@@ -294,16 +296,18 @@ mapAnno ::
      ->
         (NumberAnno anno -> NumberAnno anno')
      ->
+        (SequenceAnno anno -> SequenceAnno anno')
+     ->
         (TextAnno anno -> TextAnno anno')
      ->
         MatterF anno pos neseq seq a
      ->
         MatterF anno' pos neseq seq a
 {-# INLINE mapAnno #-}
-mapAnno f g h = \case
+mapAnno f g h i = \case
     FlatF flt -> FlatF (flat flt)
     VariantF l r x -> VariantF l r x
-    SequenceF l xs r -> SequenceF l (fmap sequencePart xs) r
+    SequenceF anno l xs r -> SequenceF (h anno) l (fmap sequencePart xs) r
     MetaGtF l x r y -> MetaGtF l x r (closePin y)
     ParenF l x r -> ParenF l x r
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
@@ -312,7 +316,7 @@ mapAnno f g h = \case
         Atom l r -> Atom l r
         Bytes anno l r more -> Bytes (f anno) l r more
         Number anno l r fpart epart -> Number (g anno) l r fpart epart
-        Text anno txt -> Text (h anno) txt
+        Text anno txt -> Text (i anno) txt
 
     sequencePart = \case
         Item x -> Item x

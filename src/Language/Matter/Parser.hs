@@ -20,6 +20,8 @@ module Language.Matter.Parser (
     ST.TextAnno,
     MatterParse (..),
     bytesAnnoSize,
+    sequenceAnnoItemCount,
+    sequenceAnnoMetaEqCount,
     textAnnoCounts,
 
     Stk,
@@ -59,6 +61,16 @@ bytesAnnoSize (MkBytesAnno n) = n
 data instance ST.NumberAnno Anno =
     MkNumberAnno
   deriving (Eq, Show)
+
+data instance ST.SequenceAnno Anno =
+    MkSequenceAnno !Word32 !Word32
+  deriving (Eq, Show)
+
+sequenceAnnoItemCount :: ST.SequenceAnno Anno -> Word32
+sequenceAnnoItemCount (MkSequenceAnno n _nmeta) = n
+
+sequenceAnnoMetaEqCount :: ST.SequenceAnno Anno -> Word32
+sequenceAnnoMetaEqCount (MkSequenceAnno _n nmeta) = nmeta
 
 data instance ST.TextAnno Anno =
     MkTextAnno !Pos
@@ -148,10 +160,15 @@ data Stk a =
     OpenVariant Pos Pos (Stk a)   -- ^ won't pop
   |
     -- | [ a b c
-    OpenSequence Pos (MatterSeq a (ST.SequencePart Pos a)) (Stk a)   -- ^ won't pop
+    --
+    -- The 'Word32's count 'Item's and 'MetaEQ's
+    OpenSequence Pos (MatterSeq a (ST.SequencePart Pos a)) !Word32 !Word32 (Stk a)   -- ^ won't pop
   |
     -- | [ a b c {=
-    Sequence_OpenMetaEQ Pos (MatterSeq a (ST.SequencePart Pos a)) Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    --
+    -- The 'Word32's count 'Item's and 'MetaEQ's (excluding the
+    -- unclosed one at the top of the stack)
+    Sequence_OpenMetaEQ Pos (MatterSeq a (ST.SequencePart Pos a)) !Word32 !Word32 Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | {> and {> a
     OpenMetaGT Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
@@ -332,22 +349,22 @@ snoc l r = curry $ \case
         Just $ OpenVariant l r $ simplify stk
     -- [ ]
     (stk, SdToken SdOpenSeq) ->
-        Just $ OpenSequence l emptyMatterSeq $ simplify stk
+        Just $ OpenSequence l emptyMatterSeq 0 0 $ simplify stk
     (stk, SdToken SdCloseSeq) ->
         case simplify stk of
-            OpenSequence p1 acc stk' ->
-                push stk' $ parseAlgebra $ ST.SequenceF p1 acc l
+            OpenSequence p1 acc n nmeta stk' ->
+                push stk' $ parseAlgebra $ ST.SequenceF (MkSequenceAnno n nmeta) p1 acc l
             _ -> Nothing
     -- {= =}
     (stk, SdToken (SdOpenMeta EQ)) -> do
         case simplify stk of
-            OpenSequence p1 acc stk' ->
-                Just $ Sequence_OpenMetaEQ p1 acc l Nothing stk'
+            OpenSequence p1 acc n nmeta stk' ->
+                Just $ Sequence_OpenMetaEQ p1 acc n nmeta l Nothing stk'
             _ -> Nothing
     (stk, SdToken (SdCloseMeta EQ)) -> do
         case simplify stk of
-            Sequence_OpenMetaEQ p1 acc p2 (Just m) stk' ->
-                Just $ OpenSequence p1 (snocMatterSeq acc $ ST.MetaEQ p2 m l) stk'
+            Sequence_OpenMetaEQ p1 acc n nmeta p2 (Just m) stk' ->
+                Just $ OpenSequence p1 (snocMatterSeq acc $ ST.MetaEQ p2 m l) n (nmeta + 1) stk'
             _ -> Nothing
     -- {> >}
     (stk, SdToken (SdOpenMeta GT)) ->
@@ -525,11 +542,11 @@ push = flip $ \m -> \case
         Nothing
     OpenVariant l r stk ->
         push stk $ parseAlgebra $ ST.VariantF l r m
-    OpenSequence p acc stk ->
-        Just $ OpenSequence p (snocMatterSeq acc $ ST.Item m) stk
-    Sequence_OpenMetaEQ p1 acc p2 mb stk ->
+    OpenSequence p acc n nmeta stk ->
+        Just $ OpenSequence p (snocMatterSeq acc $ ST.Item m) (n + 1) nmeta stk
+    Sequence_OpenMetaEQ p1 acc n nmeta p2 mb stk ->
         case mb of
-            Nothing -> Just $ Sequence_OpenMetaEQ p1 acc p2 (Just m) stk
+            Nothing -> Just $ Sequence_OpenMetaEQ p1 acc n nmeta p2 (Just m) stk
             Just{} -> Nothing
     OpenMetaGT p mb stk ->
         case mb of
@@ -623,23 +640,23 @@ instance (Show (MatterSeq a (ST.SequencePart Pos a)), Show a) => Show (Stk a) wh
                          (showsPrec 11 b3_aVf))))))
     showsPrec
       a_aVg
-      (OpenSequence b1_aVh b2_aVi b3_aVj)
+      (OpenSequence b1_aVh b2_aVi b3_aVj x y)
       = showParen
           (a_aVg >= 11)
-          ((.)
-             (showString "OpenSequence ")
-             ((.)
-                (showsPrec 11 b1_aVh)
-                ((.)
-                   showSpace
-                   ((.)
-                      (showsPrec 11 b2_aVi)
-                      ((.)
-                         showSpace
-                         (showsPrec 11 b3_aVj))))))
+          ((showString "OpenSequence ") .
+             showsPrec 11 b1_aVh
+             . showSpace .
+             showsPrec 11 b2_aVi
+             . showSpace .
+             (showsPrec 11 b3_aVj)
+             . showSpace .
+             (showsPrec 11 x)
+             . showSpace .
+             (showsPrec 11 y)
+          )
     showsPrec
       a_aVk
-      (Sequence_OpenMetaEQ b1_aVl b2_aVm b3_aVn b4_aVo b5_aVp)
+      (Sequence_OpenMetaEQ b1_aVl b2_aVm b3_aVn b4_aVo b5_aVp x y)
       = showParen
           (a_aVk >= 11)
           ((.)
@@ -656,11 +673,14 @@ instance (Show (MatterSeq a (ST.SequencePart Pos a)), Show a) => Show (Stk a) wh
                             (showsPrec 11 b3_aVn)
                             ((.)
                                showSpace
-                               ((.)
-                                  (showsPrec 11 b4_aVo)
-                                  ((.)
-                                     showSpace
-                                     (showsPrec 11 b5_aVp))))))))))
+                               ((showsPrec 11 b4_aVo)
+                                . showSpace .
+                                (showsPrec 11 b5_aVp)
+                                . showSpace .
+                                (showsPrec 11 x)
+                                . showSpace .
+                                (showsPrec 11 y)
+                                  ))))))))
     showsPrec
       a_aVq
       (OpenMetaGT b1_aVr b2_aVs b3_aVt)
