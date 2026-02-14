@@ -1,3 +1,4 @@
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 
@@ -9,7 +10,10 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
+import Data.Text.Short qualified as TS
 import Data.Word (Word32)
+import GHC.Exts (fromList)
+import Language.Matter.Interpreter qualified as I
 import Language.Matter.Parser qualified as P
 import Language.Matter.Tokenizer
 import Language.Matter.Tokenizer.Counting (Four (..))
@@ -133,110 +137,136 @@ testCases = [
 
     -- BytesAnno
 
-  , passingAnd "0x" $ \case
-        Flat (Bytes anno _) -> P.bytesAnnoSize anno == 0
-        _ -> False
+  , passingAnd "0x" $ \_s -> \case
+        Flat (Bytes anno _) -> Just (P.bytesAnnoSize anno, 0)
+        _ -> Nothing
 
-  , passingAnd "0x11223344556677" $ \case
-        Flat (Bytes anno _) -> P.bytesAnnoSize anno  == 7
-        _ -> False
+  , passingAnd "0x11223344556677" $ \_s -> \case
+        Flat (Bytes anno _) -> Just (P.bytesAnnoSize anno , 7)
+        _ -> Nothing
 
-  , passingAnd "0x11 <> 0x2233 <> 0x <> 0x44" $ \case
-        Flat (Bytes anno _) -> P.bytesAnnoSize anno  == 4
-        _ -> False
+  , passingAnd "0x11 <> 0x2233 <> 0x <> 0x44" $ \_s -> \case
+        Flat (Bytes anno _) -> Just (P.bytesAnnoSize anno , 4)
+        _ -> Nothing
 
     -- TextAnno
 
-  , passingAnd "\"\"" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
-        _ -> False
+  , passingAnd "\"\"" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        _ -> Nothing
 
-  , passingAnd "'0''0'" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
-        _ -> False
+  , passingAnd "'0''0'" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        _ -> Nothing
 
-  , passingAnd "'7''7'" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
-        _ -> False
+  , passingAnd "'7''7'" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        _ -> Nothing
 
-  , passingAnd "'23''23'" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
-        _ -> False
+  , passingAnd "'23''23'" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        _ -> Nothing
 
-  , passingAnd "'931''931'" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
-        _ -> False
+  , passingAnd "'931''931'" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        _ -> Nothing
 
-  , passingAnd "'8832''8832'" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 0 0
-        _ -> False
+  , passingAnd "'8832''8832'" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        _ -> Nothing
 
-  , passingAnd "'8832'Banana'8832'" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 6 6
-        _ -> False
+  , passingAnd "'8832'Banana'8832'" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 6 6)
+        _ -> Nothing
 
-  , passingAnd "\"\" <banana> \"\"" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 6 6
-        _ -> False
+  , passingAnd "\"\" <banana> \"\"" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 6 6)
+        _ -> Nothing
 
-  , passingAnd "\"\" <%F09F8D8C> \"\"" $ \case   -- ie 🍌
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 1 4
-        _ -> False
+  , passingAnd "\"\" <%F09F8D8C> \"\"" $ \_s -> \case   -- ie 🍌
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 1 4)
+        _ -> Nothing
 
-  , passingAnd "\"\" <> \"euro\"" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 4 4
-        _ -> False
+  , passingAnd "\"\" <> \"euro\"" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 4 4)
+        _ -> Nothing
 
-  , passingAnd "\"\" <%e282ac> \"\"" $ \case   -- ie €
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 1 3
-        _ -> False
+  , passingAnd "\"\" <%e282ac> \"\"" $ \_s -> \case   -- ie €
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 1 3)
+        _ -> Nothing
 
-  , passingAnd "\"\" <%F09F8D8C> \"€\"" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 2 7
-        _ -> False
+  , passingAnd "\"\" <%F09F8D8C> \"€\"" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 2 7)
+        _ -> Nothing
 
-  , passingAnd "_ <%F09F8D8C> \"€\"" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 1 3
-        _ -> False
+  , passingAnd "_ <%F09F8D8C> \"€\"" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 1 3)
+        _ -> Nothing
 
-  , passingAnd "\"\" <%e282ac> \"🍌\"" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 2 7
-        _ -> False
+  , passingAnd "\"\" <%e282ac> \"🍌\"" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 2 7)
+        _ -> Nothing
 
-  , passingAnd "_ <%e282ac> \"🍌\"" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 1 4
-        _ -> False
+  , passingAnd "_ <%e282ac> \"🍌\"" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 1 4)
+        _ -> Nothing
 
-  , passingAnd "\"€\" <> _ <banana> \"🍌\"" $ \case
-        Flat (Text anno _txt) -> P.textAnnoCounts anno == MkPos 2 7
-        _ -> False
+  , passingAnd "\"€\" <> _ <banana> \"🍌\"" $ \_s -> \case
+        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 2 7)
+        _ -> Nothing
+
+  , passingAnd "0x34" $ \s -> \case
+        Flat (Bytes anno bytes) ->
+            Just (I.interpretBytes s (Just anno) bytes, Right (fromList [0x34]))
+        _ -> Nothing
+
+  , passingAnd "0x34110f" $ \s -> \case
+        Flat (Bytes anno bytes) ->
+            Just (I.interpretBytes s (Just anno) bytes, Right (fromList [0x34, 0x11, 0x0f]))
+        _ -> Nothing
+
+  , passingAnd "@foo" $ \s -> \case
+        Flat (Atom l r) ->
+            Just (I.interpretSymbol s l r, TS.pack "foo")
+        _ -> Nothing
+
+  , passingAnd "#foo []" $ \s -> \case
+        Variant l r _ ->
+            Just (I.interpretSymbol s l r, TS.pack "foo")
+        _ -> Nothing
+
+  , passingAnd "# []" $ \s -> \case
+        Variant l r _ ->
+            Just (I.interpretSymbol s l r, TS.pack "")
+        _ -> Nothing
 
   ]
 
 data TestCase =
-    MkTestCase String (ParseResult -> Bool)
+    forall a. (Show a, Eq a) => MkTestCase String (ParseResult -> Maybe (a, a))
   |
     MkRoundTrip Int (Matter A P NonEmpty [])
 
 failing :: String -> TestCase
-failing s = MkTestCase s (const False)
+failing s = MkTestCase s (\_ -> Nothing :: Maybe ((), ()))
 
 passing :: String -> TestCase
-passing s = MkTestCase s (const True)
+passing s = MkTestCase s (\_ -> Just ((), ()))
 
-passingAnd :: String  -> (M -> Bool) -> TestCase
+passingAnd :: (Show a, Eq a) => String  -> (String -> M -> Maybe (a, a)) -> TestCase
 passingAnd s f = MkTestCase s $ \case
-    ParseDone m -> f m
-    ParseStuck{} -> False
-    TokenizerError{} -> False
+    ParseDone m -> f s m
+    ParseStuck{} -> Nothing
+    TokenizerError{} -> Nothing
 
 doesItPass :: TestCase -> IO Bool
 doesItPass = \case
     MkTestCase s mkExpected -> do
         let x = parseWhole s
-            expected = mkExpected x
+            mbPair = mkExpected x
+            expected = maybe False (uncurry (==)) mbPair
         let (itPasses, prefix, extra) = case x of
-                ParseDone{} -> (expected, if expected then "PASS " else "FAIL ", "")
+                ParseDone{} -> (expected, if expected then "PASS " else  "FAIL ", show mbPair)
                 ParseStuck _ _ _ stk -> (not expected, if expected then "FAIL " else "PASS ", show (P.simplify stk))
                 TokenizerError{} -> (False, "BAD ", "")
         unless itPasses $ do

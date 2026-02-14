@@ -45,6 +45,7 @@ module Language.Matter.Tokenizer.StateMachine (
 
   ) where
 
+import Data.Text.Short qualified as TS
 import Data.Text qualified as T
 import Data.Text.Internal qualified as TI
 import Data.Text.Internal.Encoding.Utf8 qualified as TI (utf8Length)
@@ -257,6 +258,9 @@ class MatterStream inp where
     -- | Drop characters that satisfy 'memberSetChar'
     munch :: SetChar -> inp -> MunchResult inp
 
+    sliceShort :: Pos -> Pos -> inp -> TS.ShortText
+    slice :: Pos -> Pos -> inp -> T.Text
+
 -- | An opt-in default for 'munch'
 --
 -- Does not call the 'munch' method. Calls once 'uncons' per
@@ -278,6 +282,11 @@ instance (a ~ Char) => MatterStream [a] where
         c:s -> UnconsJust c s
     munch = defaultSlowMunch
 
+    sliceShort x y =
+        TS.pack . take (fromIntegral $ codePoints y - codePoints x) . drop (fromIntegral $ codePoints x)
+    slice x y =
+        T.pack . take (fromIntegral $ codePoints y - codePoints x) . drop (fromIntegral $ codePoints x)
+
 instance MatterStream T.Text where
     uncons = maybe UnconsNothing (uncurry UnconsJust) . T.uncons
     munch sc txt =
@@ -294,6 +303,11 @@ instance MatterStream T.Text where
             in
             off2 - off1
 
+    sliceShort x y = TS.fromText . slice x y
+    slice x y =
+        -- TODO use utf8Bytes instead of codePoints
+        T.take (fromIntegral $ codePoints y - codePoints x) . T.drop (fromIntegral $ codePoints x)
+
 instance MatterStream TL.Text where
     uncons = maybe UnconsNothing (uncurry UnconsJust) . TL.uncons
     munch sc =
@@ -307,6 +321,11 @@ instance MatterStream TL.Text where
                 in
                 if T.null txt' then go pos'' chunks else
                 MkMunchResult pos'' $ TLI.Chunk txt' chunks
+
+    sliceShort x y = TS.fromText . slice x y
+    slice x y =
+        -- TODO use Builder.toLazyTextWith?
+        TL.toStrict . TL.take (fromIntegral $ codePoints y - codePoints x) . TL.drop (fromIntegral $ codePoints x)
 
 data SnocsResult =
     -- | A token, the position of its first character, and either the
