@@ -64,15 +64,15 @@ prettyFlat :: Foldable neseq => Flat anno pos neseq -> DNonEmpty Token
 prettyFlat = \case
     Atom _l _r -> od OdAtom
     Bytes _anno (BytesLit _l _r more) -> OdToken OdBytes `consDList` prettyMoreBytes more
-    Number _anno (NumberLit _l _r fractionPart exponentPart) ->
+    Number _anno (NumberLit mbSign _l _r fractionPart exponentPart) ->
         let x = case fractionPart of
                 NothingFraction -> mempty
                 JustFraction _l _r -> od' OdFractionPart
             y = case exponentPart of
                 NothingExponent -> mempty
-                JustExponent _l _r -> od' OdExponentPart
+                JustExponent mbSign' _l _r -> od' (OdExponentPart mbSign')
         in
-        OdToken OdIntegerPart `consDList` (x <> y)
+        OdToken (OdIntegerPart mbSign) `consDList` (x <> y)
     Text _anno txt -> prettyText txt
 
 prettyMoreBytes :: MoreBytes pos -> DList Token

@@ -15,7 +15,7 @@ import Data.Functor ((<&>))
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
 import Language.Matter.SyntaxTree
-import Language.Matter.Tokenizer.Counting (D10 (..), Four (..), Four' (..))
+import Language.Matter.Tokenizer.Counting (D10 (..), Four (..), Four' (..), MaybeSign (..), Sign (..))
 import System.Random.SplitMix (mkSMGen)
 import Math.Combinat.Partitions.Integer qualified as Combinat
 import Test.QuickCheck (shrinkList)
@@ -96,11 +96,17 @@ generateAtom =
 generateNumber :: QC.Gen (Flat A P NonEmpty)
 generateNumber =
     QC.sized $ \sz ->
-        fmap (\(fpart, epart) -> Number MkNumberA $ NumberLit MkP MkP fpart epart)
-      $ case compare sz 2 of
+        (\mbSgn (fpart, epart) -> Number MkNumberA $ NumberLit mbSgn MkP MkP fpart epart)
+    <$> genMbSgn
+    <*> case compare sz 2 of
             LT -> pure (NothingFraction, NothingExponent)
-            EQ -> oneof $ pure (JustFraction MkP MkP, NothingExponent) NE.:| [pure (NothingFraction, JustExponent MkP MkP)]
-            GT -> pure (JustFraction MkP MkP, JustExponent MkP MkP)
+            EQ -> oneof $ pure (JustFraction MkP MkP, NothingExponent) NE.:| [(,) NothingFraction <$> expo]
+            GT -> (,) (JustFraction MkP MkP) <$> expo
+  where
+    genMbSgn =
+        frequency $ (4, pure $ JustSign NegSign) NE.:| [(5, pure NothingSign), (1, pure $ JustSign PosSign)]
+
+    expo = (\mbSgn -> JustExponent mbSgn MkP MkP) <$> genMbSgn
 
 generateBytes :: QC.Gen (Flat A P NonEmpty)
 generateBytes =
@@ -239,11 +245,11 @@ shrinkMatter = \case
         Atom{} -> []
         Bytes _anno (BytesLit _l _r NoMoreBytes) -> []
         Bytes _anno (BytesLit _l _r (MoreBytes _p (BytesLit l r more))) -> [Bytes MkBytesA $ BytesLit l r more]
-        Number _anno (NumberLit l r fpart epart) -> map (Number MkNumberA) $ case (fpart, epart) of
+        Number _anno (NumberLit mbSign l r fpart epart) -> map (Number MkNumberA) $ case (fpart, epart) of
             (NothingFraction, NothingExponent) -> []
-            (JustFraction{}, NothingExponent) -> [NumberLit l r NothingFraction epart]
-            (NothingFraction, JustExponent{}) -> [NumberLit l r fpart NothingExponent]
-            (JustFraction{}, JustExponent{}) -> [NumberLit l r fpart NothingExponent, NumberLit l r NothingFraction epart]
+            (JustFraction{}, NothingExponent) -> [NumberLit mbSign l r NothingFraction epart]
+            (NothingFraction, JustExponent{}) -> [NumberLit mbSign l r fpart NothingExponent]
+            (JustFraction{}, JustExponent{}) -> [NumberLit mbSign l r fpart NothingExponent, NumberLit mbSign l r NothingFraction epart]
         Text{} -> []
 
     sequencePart = \case

@@ -14,7 +14,7 @@ import Data.Word (Word32)
 import Language.Matter.Tokenizer
 import Language.Matter.Tokenizer.Counting
 import Language.Matter.Tokenizer.Debug qualified as Debug
-import Language.Matter.Tokenizer.StateMachine (MultiQuotePartialMatch (..))
+import Language.Matter.Tokenizer.StateMachine (MultiQuotePartialMatch (..), NumberPart (..))
 import System.Exit (exitFailure)
 
 tests :: IO ()
@@ -32,7 +32,7 @@ testCases = [
     MkTestCase "" [] Done
   , MkTestCase "#foo 42 {< @bar <}"
         -- parser will reject this, but tokenizer should not
-        [ 4#OdVariant, 5#OdWhitespace, 7#OdIntegerPart, 8#OdWhitespace, 9#(SdOpenMeta LT)
+        [ 4#OdVariant, 5#OdWhitespace, 7#OdIntegerPart NothingSign, 8#OdWhitespace, 9#(SdOpenMeta LT)
         , 11#OdWhitespace, 15#OdAtom, 16#OdWhitespace, 17#(SdCloseMeta LT)
         ]
         Done
@@ -52,28 +52,28 @@ testCases = [
         [1#SdOpenPin, 3#SdClosePin]
         Done
   , MkTestCase "30"
-        [2#OdIntegerPart]
+        [2#OdIntegerPart NothingSign]
         Done
   , MkTestCase "#heading #degrees +37.3"
-        [8#OdVariant,9#OdWhitespace,17#OdVariant,18#OdWhitespace,21#OdIntegerPart,23#OdFractionPart]
+        [8#OdVariant,9#OdWhitespace,17#OdVariant,18#OdWhitespace,21#OdIntegerPart (JustSign PosSign),23#OdFractionPart]
         Done
   , MkTestCase "[1+2+3-4]"
         [0#SdOpenSeq]
         (Snoc 2 SnocNoSign)
   , MkTestCase "0.0"
-        [1#OdIntegerPart,3#OdFractionPart]
+        [1#OdIntegerPart NothingSign,3#OdFractionPart]
         Done
   , MkTestCase "0e+0"
-        [1#OdIntegerPart,4#OdExponentPart]
+        [1#OdIntegerPart NothingSign,4#OdExponentPart (JustSign PosSign)]
         Done
   , MkTestCase "-0e+0"
-        [2#OdIntegerPart,5#OdExponentPart]
+        [2#OdIntegerPart (JustSign NegSign),5#OdExponentPart (JustSign PosSign)]
         Done
   , MkTestCase "+00e00"
-        [3#OdIntegerPart,6#OdExponentPart]
+        [3#OdIntegerPart (JustSign PosSign),6#OdExponentPart NothingSign]
         Done
   , MkTestCase "+00E-007000000"
-        [3#OdIntegerPart,14#OdExponentPart]
+        [3#OdIntegerPart (JustSign PosSign),14#OdExponentPart (JustSign NegSign)]
         Done
   , MkTestCase ".5"
         []
@@ -82,14 +82,14 @@ testCases = [
         []
         (Snoc 0 SnocNeedStart)
   , MkTestCase "7e"
-        [1#OdIntegerPart]
-        (Eof 2 EofNeedExponent)
+        [1#OdIntegerPart NothingSign]
+        (Eof 2 $ EofNeedDigit $ ExponentPart NothingSign)
   , MkTestCase "0."
-        [1#OdIntegerPart]
-        (Eof 2 $ EofNeedDigit Three2)
+        [1#OdIntegerPart NothingSign]
+        (Eof 2 $ EofNeedDigit FractionPart)
   , MkTestCase "0.e"
-        [1#OdIntegerPart]
-        (Snoc 2 $ SnocNeedDigit Three2)
+        [1#OdIntegerPart NothingSign]
+        (Snoc 2 $ SnocNeedDigit FractionPart)
   , MkTestCase "]"
         [0#SdCloseSeq]
         Done
@@ -127,15 +127,15 @@ testCases = [
         Done
   , MkTestCase "#array [@uint8 32]"
         -- even more sensible
-        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSeq, 14#OdAtom, 15#OdWhitespace, 17#OdIntegerPart, 17#SdCloseSeq]
+        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSeq, 14#OdAtom, 15#OdWhitespace, 17#OdIntegerPart NothingSign, 17#SdCloseSeq]
         Done
   , MkTestCase "#array [32 @uint8 ]"
         -- equally sensible
-        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSeq, 10#OdIntegerPart, 11#OdWhitespace, 17#OdAtom, 18#OdWhitespace, 18#SdCloseSeq]
+        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSeq, 10#OdIntegerPart NothingSign, 11#OdWhitespace, 17#OdAtom, 18#OdWhitespace, 18#SdCloseSeq]
         Done
   , MkTestCase "#array [32 @uint8]"
         -- gotcha!
-        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSeq, 10#OdIntegerPart, 11#OdWhitespace, 18#OdAtom]
+        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSeq, 10#OdIntegerPart NothingSign, 11#OdWhitespace, 18#OdAtom]
         Done
   , MkTestCase "@][}{<>()\"!013_--sdf"
         [20#OdAtom]
@@ -238,7 +238,7 @@ testCases = [
         [1#OdOpenJoiner, 9#OdJoinerText]
         Done
   , MkTestCase "[@NaN 0]"
-        [0#SdOpenSeq, 5#OdAtom, 6#OdWhitespace, 7#OdIntegerPart, 7#SdCloseSeq]
+        [0#SdOpenSeq, 5#OdAtom, 6#OdWhitespace, 7#OdIntegerPart NothingSign, 7#SdCloseSeq]
         Done
   , MkTestCase "#Z '7''salsa''7'"
         [2#OdVariant, 3#OdWhitespace, 15#SdMultiQuotedString (Four1' D10_7)]
@@ -249,6 +249,18 @@ testCases = [
   , MkTestCase "<%25%25"
         [1#OdOpenJoiner, 3#SdJoinerEscapedUtf8 Four1, 6#SdJoinerEscapedUtf8 Four1]
         Done
+  , MkTestCase "+0"
+        [2#OdIntegerPart (JustSign PosSign)]
+        Done
+  , MkTestCase "++0"
+        []
+        (Snoc 1 SnocNoSign)
+  , MkTestCase "0.+3"
+        [1#OdIntegerPart NothingSign]
+        (Snoc 2 $ SnocNeedDigit FractionPart)
+  , MkTestCase "0e--0"
+        [1#OdIntegerPart NothingSign]
+        (Snoc 3 SnocNoSign)
   ]
 
 -----

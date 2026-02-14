@@ -14,7 +14,7 @@ module Language.Matter.SyntaxTree (module Language.Matter.SyntaxTree) where
 import Data.Functor.Foldable qualified as F
 import Data.Kind (Type)
 import Data.Type.Equality ((:~:) (Refl), TestEquality (testEquality))
-import Language.Matter.Tokenizer.Counting (D10, Four, Four')
+import Language.Matter.Tokenizer.Counting (D10, Four, Four', MaybeSign)
 
 -- | Isomorph of @()@, easier on the eyes
 data P = MkP
@@ -58,11 +58,11 @@ data family TextAnno anno
 
 -----
 
-data Number pos = NumberLit !pos !pos !(MaybeFraction pos) !(MaybeExponent pos)
+data Number pos = NumberLit !MaybeSign !pos !pos !(MaybeFraction pos) !(MaybeExponent pos)
 
 data MaybeFraction pos = NothingFraction | JustFraction !pos !pos
 
-data MaybeExponent pos = NothingExponent | JustExponent !pos !pos
+data MaybeExponent pos = NothingExponent | JustExponent !MaybeSign !pos !pos
 
 -----
 
@@ -260,8 +260,8 @@ mapPositions f = \case
             Atom (f l) (f r)
         Bytes anno (BytesLit l r more) ->
             Bytes anno $ BytesLit (f l) (f r) (moreBytes more)
-        Number anno (NumberLit l r fpart epart) ->
-            Number anno $ NumberLit (f l) (f r) (fractionPart fpart) (exponentPart epart)
+        Number anno (NumberLit mbSgn l r fpart epart) ->
+            Number anno $ NumberLit mbSgn (f l) (f r) (fractionPart fpart) (exponentPart epart)
         Text anno txt ->
             Text anno (text txt)
 
@@ -275,7 +275,7 @@ mapPositions f = \case
 
     exponentPart = \case
         NothingExponent -> NothingExponent
-        JustExponent l r -> JustExponent (f l) (f r)
+        JustExponent mbSgn l r -> JustExponent mbSgn (f l) (f r)
 
     text = \case
         Suppressor p1 p2 j txt -> Suppressor (f p1) (f p2) (joiner j) (text txt)

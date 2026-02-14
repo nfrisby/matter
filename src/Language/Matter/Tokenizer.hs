@@ -2,9 +2,11 @@
 module Language.Matter.Tokenizer (
 
     -- * Tokens
-    Token (..),
     OdToken (..),
+    MaybeSign (..),
     SdToken (..),
+    Sign (..),
+    Token (..),
 
     -- * Input streams
     MatterStream (..),

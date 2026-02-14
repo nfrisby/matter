@@ -44,7 +44,7 @@ import Data.Word (Word32)
 import GHC.Show (showSpace)
 import Language.Matter.Tokenizer (OdToken (..), Pos (..), SdToken (..), Token (..))
 import Language.Matter.Tokenizer qualified as T
-import Language.Matter.Tokenizer.Counting (forgetFour', valueFour)
+import Language.Matter.Tokenizer.Counting (MaybeSign, forgetFour', valueFour)
 import Language.Matter.SyntaxTree qualified as ST
 
 data Anno
@@ -113,35 +113,35 @@ utOf _fstk = singI
 -- whatever is /juxtaposed after/ that stack.
 data Flat :: FLAT -> Type where
     -- | 1
-    IntegerPart :: Pos -> Pos -> Flat I
+    IntegerPart :: !MaybeSign -> !Pos -> !Pos -> Flat I
     -- | .2
-    FractionPart :: Pos -> Pos -> Flat I -> Flat F
+    FractionPart :: !Pos -> !Pos -> Flat I -> Flat F
 
     -- | _
-    Suppressor :: Pos -> Flat U
+    Suppressor :: !Pos -> Flat U
     -- | @"hi"@
-    Text :: ST.Quote -> Pos -> Pos -> Flat T
+    Text :: ST.Quote -> !Pos -> !Pos -> Flat T
     -- | @<@
-    OpenTextJoiner :: SingI (UT x) => Pos -> Flat x -> Flat (Jo j)
+    OpenTextJoiner :: SingI (UT x) => !Pos -> Flat x -> Flat (Jo j)
     -- | foobar
-    JoinerText :: Pos -> Pos -> Flat (Jo ST.Je) -> Flat (Jo ST.Jt)
+    JoinerText :: !Pos -> !Pos -> Flat (Jo ST.Je) -> Flat (Jo ST.Jt)
     -- | %25
     Escapes :: NonEmpty (ST.Escape Pos) -> Flat (Jo ST.Jt) -> Flat (Jo ST.Je)
     -- | @>@
-    CloseTextJoiner :: Pos -> Flat (Jo j) -> Flat Jc
+    CloseTextJoiner :: !Pos -> Flat (Jo j) -> Flat Jc
     -- | @_@ after joiner
-    MoreSuppressor :: Pos -> Flat Jc -> Flat U
+    MoreSuppressor :: !Pos -> Flat Jc -> Flat U
     -- | @"hi"@ after joiner
-    MoreText :: ST.Quote -> Pos -> Pos -> Flat Jc -> Flat T
+    MoreText :: ST.Quote -> !Pos -> !Pos -> Flat Jc -> Flat T
 
     -- | 0xAB
-    Bytes :: Pos -> Pos -> Flat B
+    Bytes :: !Pos -> !Pos -> Flat B
     -- | only @>@
-    OpenBytesJoiner :: Pos -> Flat B -> Flat Jb1   -- must be followed by bytes
+    OpenBytesJoiner :: !Pos -> Flat B -> Flat Jb1   -- must be followed by bytes
     -- | only @>@
-    CloseBytesJoiner :: Pos -> Flat Jb1 -> Flat Jb2   -- must be followed by bytes
+    CloseBytesJoiner :: !Pos -> Flat Jb1 -> Flat Jb2   -- must be followed by bytes
     -- | 0xAB after joiner
-    MoreBytes :: Pos -> Pos -> Flat Jb2 -> Flat B
+    MoreBytes :: !Pos -> !Pos -> Flat Jb2 -> Flat B
 
 -----
 
@@ -157,42 +157,42 @@ data Stk a =
     forall x. Show (Flat x) => Flat (Flat x) (Stk a)   -- ^ might pop
   |
     -- | #
-    OpenVariant Pos Pos (Stk a)   -- ^ won't pop
+    OpenVariant !Pos !Pos (Stk a)   -- ^ won't pop
   |
     -- | [ a b c
     --
     -- The 'Word32's count 'Item's and 'MetaEQ's
-    OpenSequence Pos (MatterSeq a (ST.SequencePart Pos a)) !Word32 !Word32 (Stk a)   -- ^ won't pop
+    OpenSequence !Pos (MatterSeq a (ST.SequencePart Pos a)) !Word32 !Word32 (Stk a)   -- ^ won't pop
   |
     -- | [ a b c {=
     --
     -- The 'Word32's count 'Item's and 'MetaEQ's (excluding the
     -- unclosed one at the top of the stack)
-    Sequence_OpenMetaEQ Pos (MatterSeq a (ST.SequencePart Pos a)) !Word32 !Word32 Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    Sequence_OpenMetaEQ !Pos (MatterSeq a (ST.SequencePart Pos a)) !Word32 !Word32 !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | {> and {> a
-    OpenMetaGT Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    OpenMetaGT !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | {> a >}
-    MetaGT_ Pos a Pos (Stk a)   -- ^ pops
+    MetaGT_ !Pos a !Pos (Stk a)   -- ^ pops
   |
     -- | ( and ( a
-    OpenParen Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    OpenParen !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | (^ and (^ a
-    OpenPin Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    OpenPin !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | (^ a )
-    PinParen Pos a Pos (Stk a)   -- ^ won't pop because must be followed by {<
+    PinParen !Pos a !Pos (Stk a)   -- ^ won't pop because must be followed by {<
   |
     -- | {> a >} (^ b ^)
-    MetaGT_PinPin Pos a Pos Pos a Pos (Stk a)   -- ^ won't pop because must be followed by {<
+    MetaGT_PinPin !Pos a !Pos !Pos a !Pos (Stk a)   -- ^ won't pop because must be followed by {<
   |
     -- | (^ a ) {< and (^ a ) {< b
-    PinParen_OpenMetaLT Pos a Pos Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    PinParen_OpenMetaLT !Pos a !Pos !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | {> a >} (^ b ^) {< and {> a >} (^ b ^) {< c
-    MetaGT_PinPin_OpenMetaLT Pos a Pos Pos a Pos Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    MetaGT_PinPin_OpenMetaLT !Pos a !Pos !Pos a !Pos !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
 
 -- | A data type the parser knows how to construct
 class MatterParse a where
@@ -223,15 +223,15 @@ snoc :: MatterParse a => Pos -> Pos -> Stk a -> Token -> Maybe (Stk a)
 snoc l r = curry $ \case
 
     -- all number frames and number-continuation tokens
-    (Flat (IntegerPart l1 r1) stk, OdToken OdFractionPart) ->
-        Just $ Flat (FractionPart l r $ IntegerPart l1 r1) stk
-    (Flat (FractionPart l2 r2 (IntegerPart l1 r1)) stk, OdToken OdExponentPart) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent l r)
-    (Flat (IntegerPart l1 r1) stk, OdToken OdExponentPart) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit l1 r1 ST.NothingFraction (ST.JustExponent l r)
+    (Flat (IntegerPart mbSign l1 r1) stk, OdToken OdFractionPart) ->
+        Just $ Flat (FractionPart l r $ IntegerPart mbSign l1 r1) stk
+    (Flat (FractionPart l2 r2 (IntegerPart mbSign1 l1 r1)) stk, OdToken (OdExponentPart mbSign)) ->
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit mbSign1 l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent mbSign l r)
+    (Flat (IntegerPart mbSign1 l1 r1) stk, OdToken (OdExponentPart mbSign)) ->
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit mbSign1 l1 r1 ST.NothingFraction (ST.JustExponent mbSign l r)
 
     (_stk, OdToken OdFractionPart) -> Nothing
-    (_stk, OdToken OdExponentPart) -> Nothing
+    (_stk, OdToken OdExponentPart{}) -> Nothing
 
     -- SdCloseJoiner
     (Flat fstk@OpenTextJoiner{} stk, SdToken SdCloseJoiner) ->
@@ -329,8 +329,8 @@ snoc l r = curry $ \case
     (stk, OdToken OdAtom) ->
         push (simplify stk) $ parseAlgebra $ ST.FlatF $ ST.Atom l r
     -- 0
-    (stk, OdToken OdIntegerPart) ->
-        Just $ Flat (IntegerPart l r) $ simplify stk
+    (stk, OdToken (OdIntegerPart mbSign)) ->
+        Just $ Flat (IntegerPart mbSign l r) $ simplify stk
     -- _
     (stk, SdToken SdUnderscore) ->
         Just $ Flat (Suppressor l) $ simplify stk
@@ -445,8 +445,8 @@ pop = \case
     
 popFlat :: MatterParse a => Flat x -> Maybe a
 popFlat = \case
-    IntegerPart l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit l r ST.NothingFraction ST.NothingExponent
-    FractionPart l2 r2 (IntegerPart l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
+    IntegerPart mbSign l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit mbSign l r ST.NothingFraction ST.NothingExponent
+    FractionPart l2 r2 (IntegerPart mbSign l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit mbSign l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
     Suppressor{} -> Nothing
     x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ uncurry (ST.Text . finalizeTA) $ popT mempty ST.NoMoreText x
     OpenTextJoiner{} -> Nothing
@@ -878,16 +878,15 @@ instance (Show (MatterSeq a (ST.SequencePart Pos a)), Show a) => Show (Stk a) wh
 instance Show (Flat x) where
     showsPrec
       a_a2ln
-      (IntegerPart b1_a2lo b2_a2lp)
-      = showParen
-          (a_a2ln >= 11)
-          ((.)
-             (showString "IntegerPart ")
-             ((.)
-                (showsPrec 11 b1_a2lo)
-                ((.)
-                   showSpace
-                   (showsPrec 11 b2_a2lp))))
+      (IntegerPart b1_a2lo b2_a2lp x)
+      = showParen (a_a2ln >= 11) $
+           showString "IntegerPart "
+           .
+           showsPrec 11 b1_a2lo
+           . showSpace .
+           showsPrec 11 b2_a2lp
+           . showSpace .
+           showsPrec 11 x
     showsPrec
       a_a2lq
       (FractionPart b1_a2lr b2_a2ls b3_a2lt)

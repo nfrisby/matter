@@ -8,9 +8,11 @@
 module Language.Matter.Tokenizer.StateMachine (
 
     -- * Tokens
-    Token (..),
     OdToken (..),
+    MaybeSign (..),
     SdToken (..),
+    Sign (..),
+    Token (..),
 
     -- * Input streams
     MatterStream (..),
@@ -22,6 +24,7 @@ module Language.Matter.Tokenizer.StateMachine (
 
     -- * Tokenizer states
     MultiQuotePartialMatch (..),
+    NumberPart (..),
     St (..),
     Tokenizer (..),
     startTokenizer,
@@ -107,6 +110,28 @@ roughly ordered.
 
 -}
 
+data SomeOrMany = Some | Many
+
+data NumberPart =
+    IntegerPart !MaybeSign
+  |
+    FractionPart
+  |
+    ExponentPart !MaybeSign
+
+-- | Try to add a + or - to the 'Digits' state
+snocSign :: NumberPart -> Sign -> SnocResult
+snocSign part sgn = case part of
+    IntegerPart mbSign -> f IntegerPart mbSign
+    FractionPart -> SnocError $ SnocNeedDigit FractionPart
+    ExponentPart mbSign -> f ExponentPart mbSign
+  where
+    f g = \case
+        NothingSign -> SnocEpsilon $ Digits Some $ g $ JustSign sgn
+        JustSign{} -> SnocError SnocNoSign
+
+-----
+
 -- | A state of the tokenizer
 --
 -- This state does not track position, length, the input stream, etc.
@@ -135,11 +160,7 @@ data St =
   |
     ManyBytes
   |
-    SomeDigits !Three
-  |
-    ManyDigits !Three
-  |
-    Exponent
+    Digits !SomeOrMany !NumberPart
   |
     DoubleQuotedString
   |
@@ -193,8 +214,12 @@ data MultiQuotePartialMatch a =
 
 -----
 
+deriving instance Show SomeOrMany
+deriving instance Show NumberPart
 deriving instance Show St
 deriving instance Show Utf8Size
+deriving instance Eq SomeOrMany
+deriving instance Eq NumberPart
 deriving instance Eq St
 deriving instance Eq Utf8Size
 
@@ -412,11 +437,11 @@ data OdToken =
   |
     OdBytes
   |
-    OdIntegerPart
+    OdIntegerPart !MaybeSign
   |
     OdFractionPart
   |
-    OdExponentPart
+    OdExponentPart !MaybeSign
   deriving (Eq, Show)
 
 data EofError =
@@ -428,7 +453,7 @@ data EofError =
   |
     EofNeedNibble
   |
-    EofNeedDigit !Three
+    EofNeedDigit !NumberPart
   |
     EofDoubleQuotedString
   |
@@ -439,8 +464,6 @@ data EofError =
     EofMultiQuotedString3 !(MultiQuotePartialMatch D10)
   |
     EofJoinerEscapedUtf8 !(Maybe' Four)
-  |
-    EofNeedExponent
   deriving (Eq, Show)
 
 -- | There will never be another character
@@ -470,21 +493,19 @@ eof start cur = \case
 
     LeftAngleSuccessor -> EofJust OdOpenJoiner
 
-    ZeroSuccessor -> EofJust OdIntegerPart
+    ZeroSuccessor -> EofJust $ OdIntegerPart NothingSign
 
     ManyBytes ->
         if odd (posDiff cur start)
         then EofError EofNeedNibble
         else EofJust OdBytes
 
-    SomeDigits acc -> EofError $ EofNeedDigit acc
+    Digits Some acc -> EofError $ EofNeedDigit acc
 
-    ManyDigits acc -> EofJust $ case acc of
-        Three1 -> OdIntegerPart
-        Three2 -> OdFractionPart
-        Three3 -> OdExponentPart
-
-    Exponent -> EofError EofNeedExponent
+    Digits Many acc -> EofJust $ case acc of
+        IntegerPart mbSgn -> OdIntegerPart mbSgn
+        FractionPart -> OdFractionPart
+        ExponentPart mbSgn -> OdExponentPart mbSgn
 
     DoubleQuotedString -> EofError EofDoubleQuotedString
 
@@ -575,17 +596,13 @@ data SnocError =
   |
     SnocNeedNibble
   |
-    -- | Whether we're in the integer part (of the mantissa), the
-    -- fraction part (of the mantissa), or the exponent part
-    SnocNeedDigit !Three
+    SnocNeedDigit !NumberPart
   |
     SnocNeedRightParen
   |
     SnocNeedOrdering
   |
     SnocNeedRightBrace
-  |
-    SnocNeedExponent
   |
     SnocNeedSingleQuote
   |
@@ -664,12 +681,14 @@ snoc start cur = \case
 
     ZeroSuccessor -> \case
         'x' -> SnocEpsilon ManyBytes
-        '.' -> SnocOd OdIntegerPart $ SomeDigits Three2
-        'e' -> SnocOd OdIntegerPart Exponent
-        'E' -> SnocOd OdIntegerPart Exponent
+        '.' -> SnocOd odInt $ Digits Some FractionPart
+        'e' -> SnocOd odInt $ Digits Some $ ExponentPart NothingSign
+        'E' -> SnocOd odInt $ Digits Some $ ExponentPart NothingSign
         c
-          | isD10 c -> SnocEpsilon (ManyDigits Three1)
-          | otherwise -> jumpStart SignsNotOk OdIntegerPart c
+          | isD10 c -> SnocEpsilon $ Digits Many $ IntegerPart NothingSign
+          | otherwise -> jumpStart SignsNotOk odInt c
+      where
+        odInt = OdIntegerPart NothingSign
 
     -- loop
     ManyBytes -> \c ->
@@ -678,31 +697,29 @@ snoc start cur = \case
         then SnocError SnocNeedNibble
         else jumpStart SignsNotOk OdBytes c
 
-    SomeDigits acc -> \c ->
-        if isD10 c then SnocEpsilon $ ManyDigits acc else
-        SnocError $ SnocNeedDigit acc
+    Digits Some acc -> \case
+        '+' -> snocSign acc PosSign
+        '-' -> snocSign acc NegSign
+        c | isD10 c -> SnocEpsilon $ Digits Many acc
+        _ -> SnocError $ SnocNeedDigit acc
 
-    -- loop
-    ManyDigits acc -> \c ->
+    -- some
+    Digits Many acc -> \c ->
         let tk = case acc of
-                Three1 -> OdIntegerPart
-                Three2 -> OdFractionPart
-                Three3 -> OdExponentPart
+                IntegerPart mbSgn -> OdIntegerPart mbSgn
+                FractionPart -> OdFractionPart
+                ExponentPart mbSgn -> OdExponentPart mbSgn
+            exponentSt =
+                Digits Some $ ExponentPart NothingSign
         in
-        if isD10 c then SnocEpsilon $ ManyDigits acc else
+        if isD10 c then SnocEpsilon $ Digits Many acc else
         case (acc, c) of
-            (Three1, '.') -> SnocOd tk $ SomeDigits Three2
-            (Three1, 'e') -> SnocOd tk Exponent
-            (Three1, 'E') -> SnocOd tk Exponent
-            (Three2, 'e') -> SnocOd tk Exponent
-            (Three2, 'E') -> SnocOd tk Exponent
+            (IntegerPart{}, '.') -> SnocOd tk $ Digits Some FractionPart
+            (IntegerPart{}, 'e') -> SnocOd tk exponentSt
+            (IntegerPart{}, 'E') -> SnocOd tk exponentSt
+            (FractionPart, 'e') -> SnocOd tk exponentSt
+            (FractionPart, 'E') -> SnocOd tk exponentSt
             _ -> jumpStart SignsNotOk tk c
-
-    Exponent -> \case
-        '+' -> SnocEpsilon $ SomeDigits Three3
-        '-' -> SnocEpsilon $ SomeDigits Three3
-        c | isD10 c -> SnocEpsilon $ ManyDigits Three3
-        _ -> SnocError SnocNeedExponent
 
     -- loop
     DoubleQuotedString -> \case
@@ -824,17 +841,17 @@ snocStart flag snocNothing snocJust = \case
     '=' -> snocNothing EqualsSuccessor
     '>' -> snocNothing RightAngleSuccessor
     '0' -> snocNothing ZeroSuccessor
-    c | isD10 c -> snocNothing $ ManyDigits Three1
-    '+' -> snocSign
-    '-' -> snocSign
+    c | isD10 c -> snocNothing $ Digits Many $ IntegerPart NothingSign
+    '+' -> snocStartSign PosSign
+    '-' -> snocStartSign NegSign
     '"' -> snocNothing DoubleQuotedString
     '\'' -> snocNothing $ MultiQuotedString1 Nothing'
     '_' -> snocJust SdUnderscore Start
     _ -> SnocError SnocNeedStart
   where
-    snocSign = case flag of
+    snocStartSign sgn = case flag of
         SignsNotOk -> SnocError SnocNoSign
-        SignsOk -> snocNothing $ SomeDigits Three1
+        SignsOk -> snocNothing $ Digits Some $ IntegerPart $ JustSign sgn
 
 -----
 
@@ -886,7 +903,7 @@ loops = \case
     ManyIdAtom -> Just setCharID
     ManyIdVariant -> Just setCharID
     ManyBytes -> Just setCharD16
-    ManyDigits _ -> Just setCharD10
+    Digits Many _ -> Just setCharD10
     DoubleQuotedString -> Just $ setCharComplement1 '"'
     MultiQuotedString2 _ -> Just $ setCharComplement1 '\''
     JoinerNotEscaped -> Just $ setCharComplement2 '%' '>'

@@ -6,11 +6,13 @@ module Language.Matter.Tokenizer.Counting (
 
     -- * Counting types
     Maybe' (..),
+    MaybeSign (..),
     Two (..),
     Three (..),
     Four (..),
     Four' (..),
     Five (..),
+    Sign (..),
     forgetFour',
     valueFour,
 
@@ -240,3 +242,14 @@ leadingBitCountPlus1 = \case
 
     -- 1111
     D16_F -> Five5
+
+-----
+
+data Sign = NegSign | PosSign
+
+data MaybeSign = NothingSign | JustSign !Sign
+
+deriving instance Show Sign
+deriving instance Show MaybeSign
+deriving instance Eq Sign
+deriving instance Eq MaybeSign

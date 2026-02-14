@@ -63,7 +63,7 @@ wrap f = \tk -> MkBuilder $ \s ->
     (# m, after tk #)
   where
     cantFollowDigit = \case
-        OdToken OdIntegerPart -> True
+        OdToken OdIntegerPart{} -> True
         OdToken OdBytes -> True
         _ -> False
 
@@ -82,9 +82,9 @@ after = \case
         OdOpenJoiner{} -> Any
         OdJoinerText{} -> Any
         OdBytes -> Digit
-        OdIntegerPart -> Digit
+        OdIntegerPart{} -> Digit
         OdFractionPart -> Digit
-        OdExponentPart -> Digit
+        OdExponentPart{} -> Digit
     SdToken{} -> Any
 
 -- | Inserts an 'OdWhitespace' whenever necessary
@@ -98,9 +98,9 @@ prettyToken g = let ?g = g in wrap $ \case
         OdOpenJoiner -> "<"
         OdJoinerText -> pick " " ["join", "\t", ",", "<", "~<"]
         OdBytes -> "0x" <> pick "" ["00", "AB", "a1973b", "FEEB", "0103", "0000", "123456"]
-        OdIntegerPart -> integerPart
+        OdIntegerPart mbSign -> integerPart mbSign
         OdFractionPart -> "." <> pick "0" ["123", "100", "000", "00900"]
-        OdExponentPart -> pick "e" ["E"] <> integerPart
+        OdExponentPart mbSign -> pick "e" ["E"] <> integerPart mbSign
     SdToken sd -> case sd of
         SdOpenSeq -> "["
         SdCloseSeq -> "]"
@@ -133,8 +133,15 @@ prettyToken g = let ?g = g in wrap $ \case
             Four3 -> pick "E299bf"   ["E29a80", "E2998B", "E2A88C", "E0B8BF", "EFb4bF"]
             Four4 -> pick "F09F8084" ["F09f82a1", "F09F8E83", "F09FA4AA"]
 
-integerPart :: (R.StatefulGen g m, ?g :: g) => Builder m
-integerPart = pick "" ["+", "-"] <> pick "0" ["123", "100", "000", "00900"]
+integerPart :: (R.StatefulGen g m, ?g :: g) => MaybeSign -> Builder m
+integerPart = \case
+    NothingSign -> digits
+    JustSign sgn -> f sgn <> digits
+  where
+    digits = pick "0" ["123", "100", "000", "00900"]
+    f = \case
+        NegSign -> "-"
+        PosSign -> "+"
 
 digit :: Applicative m => D10 -> Builder m
 digit = \case
