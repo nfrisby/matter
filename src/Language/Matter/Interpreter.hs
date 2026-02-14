@@ -32,7 +32,6 @@ import Data.Word (Word8, Word32)
 import GHC.Exts qualified as GHC
 import GHC.Word qualified as GHC
 
-import Language.Matter.Parser (Anno, bytesAnnoSize)
 import Language.Matter.SyntaxTree
 import Language.Matter.Tokenizer (MatterStream (slice, sliceShort), Pos (..))
 
@@ -42,12 +41,12 @@ interpretSymbol inp x y =
     -- skip the @ or the #
     sliceShort (x <> MkPos 1 1) y inp
 
-interpretBytes :: MatterStream inp => inp -> Maybe (BytesAnno Anno) -> Bytes Pos -> Either String BA.ByteArray
-interpretBytes inp mbAnno top =
+interpretBytes :: MatterStream inp => inp -> Maybe Word32 -> Bytes blit Pos -> Either String BA.ByteArray
+interpretBytes inp mbByteSize top =
     runST $ do
         marr <- BA.newByteArray (fromIntegral n)
         let go !i = \case
-                BytesLit l r more -> do
+                BytesLit _blit l r more -> do
                     let txt@(TI.Text arr off len) = slice l r inp
                     mx <- go2 i arr (off + 2) 0 0 (len - 2)   -- skip 0x
                     if mx == maxBound then pure (Just (l, r, txt)) else do
@@ -67,17 +66,17 @@ interpretBytes inp mbAnno top =
             Nothing -> Right <$> BA.unsafeFreezeByteArray marr
                 -- TODO why isn't there a @createByteArrayMaybe :: Int -> (forall s. MutableByteArray s -> ST s (Maybe e)) -> Either e ByteArray@?
   where
-    n = case mbAnno of
-        Just anno -> bytesAnnoSize anno
+    n = case mbByteSize of
+        Just byteSize -> byteSize
         Nothing ->
             let count !acc = \case
-                    BytesLit l r more ->
-                        count2 (acc + codePoints r - codePoints l - 2) more
+                    BytesLit _blit l r more ->
+                        count2 (acc + codePoints r - codePoints l - 2) more   -- skip 0x
                 count2 !acc = \case
                     NoMoreBytes -> acc
                     MoreBytes _p b -> count acc b
             in
-            count 0 top
+            div (count 0 top) 2   -- {- 2 nibbles per byte -}
 
     -- copied from base16-bytestring-1.0.2.0:Data.ByteString.Base16.Internal
     !lo = "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\xff\xff\xff\xff\xff\xff\xff\x0a\x0b\x0c\x0d\x0e\x0f\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x0a\x0b\x0c\x0d\x0e\x0f\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"#
@@ -93,7 +92,7 @@ interpretBytes inp mbAnno top =
 
 interpretBytesLit :: MatterStream inp => inp -> Pos -> Pos -> Either String BA.ByteArray
 interpretBytesLit inp l r =
-    GHC.inline interpretBytes inp Nothing $ BytesLit l r NoMoreBytes
+    GHC.inline interpretBytes inp Nothing $ BytesLit MkX l r NoMoreBytes
 
 -- TODO interpretNumber
 
@@ -205,16 +204,16 @@ pathedFmap ::
  ->
     Path
  ->
-    (Path -> a -> b)
+    (Path -> a -> a')
  ->
-    MatterF anno Pos neseq seq a
+    MatterF seq b n s t Pos a
  ->
-    MatterF anno Pos neseq seq b
+    MatterF seq b n s t Pos a'
 {-# INLINE pathedFmap #-}
 pathedFmap inp path f = \case
     FlatF flt -> FlatF flt
-    VariantF anno l r x -> VariantF anno l r $ flip f x $ SnocPath path $ VariantTurn $ interpretSymbol inp l r
-    SequenceF anno p1 xs p2 -> SequenceF anno p1 (go xs) p2
+    VariantF s l r x -> VariantF s l r $ flip f x $ SnocPath path $ VariantTurn $ interpretSymbol inp l r
+    SequenceF p1 xs p2 -> SequenceF p1 (go xs) p2
     MetaGtF p1 x p2 y -> MetaGtF p1 (flip f x $ SnocPath path MetaGtTurn) p2 $ case y of
         NoClosePin y' -> NoClosePin (flip f y' $ SnocPath path ReferentGtTurn)
         OnlyClosePin p3 y' p4 -> OnlyClosePin p3 (flip f y' $ SnocPath path ReferentGtTurn) p4
@@ -228,27 +227,27 @@ pathedFmap inp path f = \case
            p1 (flip f x $ SnocPath path ReferentLtTurn) p2
            p3 (flip f y $ SnocPath path MetaLtTurn    ) p4
   where
-    go xs = traverse sequencePart xs `State.evalState` MkX 0 0
+    go xs = traverse sequencePart xs `State.evalState` MkW32W32 0 0
     sequencePart part = case part of
         Item x -> (\e -> Item (f e x)) <$> item
         MetaEQ l x r -> (\e -> MetaEQ l (f e x) r) <$> metaEQ
-    item = State.state $ \(MkX nitem nmeta) -> (path `SnocPath` ItemTurn nitem nmeta, MkX (nitem + 1) nmeta)
-    metaEQ = State.state $ \(MkX nitem nmeta) -> (path `SnocPath` MetaEqTurn nitem nmeta, MkX nitem (nmeta + 1))
+    item = State.state $ \(MkW32W32 nitem nmeta) -> (path `SnocPath` ItemTurn nitem nmeta, MkW32W32 (nitem + 1) nmeta)
+    metaEQ = State.state $ \(MkW32W32 nitem nmeta) -> (path `SnocPath` MetaEqTurn nitem nmeta, MkW32W32 nitem (nmeta + 1))
 
 -- | NOT EXPORTED
-data X = MkX !Word32 !Word32
+data W32W32 = MkW32W32 !Word32 !Word32
 
 -- | Like 'fold' but also applies the appropriate 'Turn's to the 'Path'
 pathedFold ::
     (MatterStream inp, Traversable seq)
  =>
-    (Path -> MatterF anno Pos neseq seq a -> a)
+    (Path -> MatterF seq b n s t Pos a -> a)
  ->
     inp
  ->
     Path
  ->
-    Matter anno Pos neseq seq
+    Matter seq b n s t Pos
  ->
     a
 {-# INLINE pathedFold #-}

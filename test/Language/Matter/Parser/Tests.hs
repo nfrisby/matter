@@ -21,7 +21,6 @@ import Language.Matter.Tokenizer.Counting (Four (..))
 import Language.Matter.Tokenizer.Pretty (prettyToken, toLazyText)
 import Language.Matter.Tokenizer.Tests (printWithPositions)
 import Language.Matter.SyntaxTree
-import Language.Matter.SyntaxTree.Generator (A)
 import Language.Matter.SyntaxTree.Generator qualified as G
 import Language.Matter.SyntaxTree.Pretty (pretty)
 import System.Exit (exitFailure)
@@ -43,7 +42,7 @@ tests = do
             print sz
             g <- getStdGen
             -- TODO how to inject some unnecessary OdWhitespace tokens? Should not be adjacent to OdWhiteSpace.
-            TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: Matter A P NonEmpty Vector)
+            TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: Matter Vector (Bytes X) (Number X) (Symbol X) (Text NonEmpty X) P)
             putStrLn ""
     QC.sample' (QC.sized $ \sz -> (,) sz <$> G.generateMatter) >>= mapM_ f
 
@@ -122,122 +121,122 @@ testCases = [
 
   , passing "_<%d0af>'0''0'"
 
-  , MkRoundTrip 0 $ Flat $ Text G.MkTextA
+  , MkRoundTrip 0 $ Flat $ Text
       $ Suppressor MkP MkP
             (ConsJoinerEscapes (MkEscape MkP Four1 NE.:| [MkEscape MkP Four1]) $ NilJoiner MkP)
-      $ TextLit DoubleQuote MkP MkP
+      $ TextLit DoubleQuote MkX MkP MkP
       $ NoMoreText
 
   , passing "_<%25%C398>\"\""
 
-  , MkRoundTrip 0 $ Flat $ Text G.MkTextA
+  , MkRoundTrip 0 $ Flat $ Text
       $ Suppressor MkP MkP
           (ConsJoinerEscapes (MkEscape MkP Four2 NE.:| [MkEscape MkP Four1]) (NilJoiner MkP))
-      $ TextLit DoubleQuote MkP MkP
+      $ TextLit DoubleQuote MkX MkP MkP
       $ NoMoreText
 
     -- BytesAnno
 
   , passingAnd "0x" $ \_s -> \case
-        Flat (Bytes anno _) -> Just (P.bytesAnnoSize anno, 0)
+        Flat (Bytes b) -> Just (P.bytesAnnoSize b, 0)
         _ -> Nothing
 
   , passingAnd "0x11223344556677" $ \_s -> \case
-        Flat (Bytes anno _) -> Just (P.bytesAnnoSize anno , 7)
+        Flat (Bytes b) -> Just (P.bytesAnnoSize b, 7)
         _ -> Nothing
 
   , passingAnd "0x11 <> 0x2233 <> 0x <> 0x44" $ \_s -> \case
-        Flat (Bytes anno _) -> Just (P.bytesAnnoSize anno , 4)
+        Flat (Bytes b) -> Just (P.bytesAnnoSize b, 4)
         _ -> Nothing
 
     -- TextAnno
 
   , passingAnd "\"\"" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
   , passingAnd "'0''0'" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
   , passingAnd "'7''7'" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
   , passingAnd "'23''23'" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
   , passingAnd "'931''931'" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
   , passingAnd "'8832''8832'" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 0 0)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
   , passingAnd "'8832'Banana'8832'" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 6 6)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 6 6)
         _ -> Nothing
 
   , passingAnd "\"\" <banana> \"\"" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 6 6)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 6 6)
         _ -> Nothing
 
   , passingAnd "\"\" <%F09F8D8C> \"\"" $ \_s -> \case   -- ie 🍌
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 1 4)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 1 4)
         _ -> Nothing
 
   , passingAnd "\"\" <> \"euro\"" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 4 4)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 4 4)
         _ -> Nothing
 
   , passingAnd "\"\" <%e282ac> \"\"" $ \_s -> \case   -- ie €
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 1 3)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 1 3)
         _ -> Nothing
 
   , passingAnd "\"\" <%F09F8D8C> \"€\"" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 2 7)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 2 7)
         _ -> Nothing
 
   , passingAnd "_ <%F09F8D8C> \"€\"" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 1 3)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 1 3)
         _ -> Nothing
 
   , passingAnd "\"\" <%e282ac> \"🍌\"" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 2 7)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 2 7)
         _ -> Nothing
 
   , passingAnd "_ <%e282ac> \"🍌\"" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 1 4)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 1 4)
         _ -> Nothing
 
   , passingAnd "\"€\" <> _ <banana> \"🍌\"" $ \_s -> \case
-        Flat (Text anno _txt) -> Just (P.textAnnoCounts anno, MkPos 2 7)
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 2 7)
         _ -> Nothing
 
   , passingAnd "0x34" $ \s -> \case
-        Flat (Bytes anno bytes) ->
-            Just (I.interpretBytes s (Just anno) bytes, Right (fromList [0x34]))
+        Flat (Bytes bytes) ->
+            Just (I.interpretBytes s (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), Right (fromList [0x34]))
         _ -> Nothing
 
   , passingAnd "0x34110f" $ \s -> \case
-        Flat (Bytes anno bytes) ->
-            Just (I.interpretBytes s (Just anno) bytes, Right (fromList [0x34, 0x11, 0x0f]))
+        Flat (Bytes bytes) ->
+            Just (I.interpretBytes s (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), Right (fromList [0x34, 0x11, 0x0f]))
         _ -> Nothing
 
   , passingAnd "@foo" $ \s -> \case
-        Flat (Atom _anno l r) ->
+        Flat (Atom _s l r) ->
             Just (I.interpretSymbol s l r, TS.pack "foo")
         _ -> Nothing
 
   , passingAnd "#foo []" $ \s -> \case
-        Variant _anno l r _ ->
+        Variant _s l r _ ->
             Just (I.interpretSymbol s l r, TS.pack "foo")
         _ -> Nothing
 
   , passingAnd "# []" $ \s -> \case
-        Variant _anno l r _ ->
+        Variant _s l r _ ->
             Just (I.interpretSymbol s l r, TS.pack "")
         _ -> Nothing
 
@@ -246,7 +245,7 @@ testCases = [
 data TestCase =
     forall a. (Show a, Eq a) => MkTestCase String (ParseResult -> Maybe (a, a))
   |
-    MkRoundTrip Int (Matter A P NonEmpty Vector)
+    MkRoundTrip Int (Matter Vector (Bytes X) (Number X) (Symbol X) (Text NonEmpty X) P)
 
 failing :: String -> TestCase
 failing s = MkTestCase s (\_ -> Nothing :: Maybe ((), ()))
@@ -285,7 +284,7 @@ doesItPass = \case
 
 -----
 
-type M = Matter P.Anno Pos NonEmpty Vector
+type M = Matter P.Seq P.Bytes P.Number P.Symbol P.Text Pos
 
 data ParseResult =
     ParseDone M
@@ -323,7 +322,7 @@ prop_prettyThenParseIsSame =
     shrnk (g, m) = [ (g, m') | m' <- G.shrinkMatter m]
     noshow _ = []
 
-prop_prettyThenParseIsSame' :: (Int, Matter A P NonEmpty Vector) -> QC.Property
+prop_prettyThenParseIsSame' :: (Int, Matter Vector (Bytes X) (Number X) (Symbol X) (Text NonEmpty X) P) -> QC.Property
 prop_prettyThenParseIsSame' (g, m) =
     QC.counterexample ("m = " <> show m)
   $ QC.counterexample ("g = " <> show g)
@@ -345,11 +344,18 @@ prop_prettyThenParseIsSame' (g, m) =
   where
     forget =
         fold $ embed
-             . mapPositions (\_ -> MkP)
-             . mapAnno (\_ -> G.MkBytesA) (\_ -> G.MkNumberA) (\_ -> G.MkSequenceA) (\_ -> G.MkSymbolA) (\_ -> G.MkTextA)
+             . mapPositions
+                   (\MkPos{} -> MkP)
+             . mapSequence
+                   (\(P.MkSeq _nitem _nmeta xs) -> xs)
+             . mapBNST
+                   (\(P.MkBytes _w b) -> b)
+                   (\(P.MkNumber n) -> n)
+                   (\(P.MkSymbol s) -> s)
+                   (\(P.MkText _counts t) -> t)
 
     txt =
         runStateGen_ (mkStdGen g)
       $ \g' -> toLazyText
       $ foldMap (prettyToken g')
-      $ pretty (m :: Matter A P NonEmpty Vector)
+      $ pretty m

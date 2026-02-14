@@ -17,23 +17,29 @@ import Data.Type.Equality ((:~:) (Refl), TestEquality (testEquality))
 import Language.Matter.Tokenizer.Counting (D10, Four, Four', MaybeSign)
 
 -- | Isomorph of @()@, easier on the eyes
+--
+-- For the @pos@ variable.
 data P = MkP
 
-data Matter anno pos neseq seq =
-    Flat !(Flat anno pos neseq)
-  |
-    Variant !(SymbolAnno anno) !pos !pos (Matter anno pos neseq seq)
-  |
-    Sequence !(SequenceAnno anno) !pos (seq (SequencePart pos (Matter anno pos neseq seq))) !pos
-  |
-    MetaGT !pos (Matter anno pos neseq seq) !pos !(ClosePin pos (Matter anno pos neseq seq))
-  |
-    Paren !pos (Matter anno pos neseq seq) !pos
-  |
-    PinMetaLT !pos (Matter anno pos neseq seq) !pos !pos (Matter anno pos neseq seq) !pos
+-- | Isomorph of @()@, easier on the eyes
+--
+-- For the @blit@, @nlit@, @slit@, or @tlit@ variables.
+data X = MkX
 
-data family SymbolAnno anno
-data family SequenceAnno anno
+data Matter seq b n s t pos =
+    Flat !(Flat b n s t pos)
+  |
+    Variant !(s pos) !pos !pos (Matter seq b n s t pos)
+  |
+    Sequence !pos (seq (SequencePart pos (Matter seq b n s t pos))) !pos
+  |
+    MetaGT !pos (Matter seq b n s t pos) !pos !(ClosePin pos (Matter seq b n s t pos))
+  |
+    Paren !pos (Matter seq b n s t pos) !pos
+  |
+    PinMetaLT !pos (Matter seq b n s t pos) !pos !pos (Matter seq b n s t pos) !pos
+
+data Symbol slit pos = MkSymbol !slit
 
 data ClosePin pos a =
     NoClosePin a
@@ -44,22 +50,18 @@ data ClosePin pos a =
 
 -----
 
-data Flat anno pos neseq =
-    Atom !(SymbolAnno anno) !pos !pos
+data Flat b n s t pos =
+    Atom !(s pos) !pos !pos
   |
-    Bytes !(BytesAnno anno) {-# UNPACK #-} !(Bytes pos)
+    Bytes !(b pos)
   |
-    Number !(NumberAnno anno) {-# UNPACK #-} !(Number pos)
+    Number !(n pos)
   |
-    Text !(TextAnno anno) (Text pos neseq)
-
-data family BytesAnno anno
-data family NumberAnno anno
-data family TextAnno anno
+    Text !(t pos)
 
 -----
 
-data Number pos = NumberLit !MaybeSign !pos !pos !(MaybeFraction pos) !(MaybeExponent pos)
+data Number nlit pos = NumberLit !nlit !MaybeSign !pos !pos !(MaybeFraction pos) !(MaybeExponent pos)
 
 data MaybeFraction pos = NothingFraction | JustFraction !pos !pos
 
@@ -67,23 +69,23 @@ data MaybeExponent pos = NothingExponent | JustExponent !MaybeSign !pos !pos
 
 -----
 
-data Bytes pos = BytesLit !pos !pos (MoreBytes pos)
+data Bytes blit pos = BytesLit !blit !pos !pos (MoreBytes blit pos)
 
-data MoreBytes pos = NoMoreBytes | MoreBytes !pos !(Bytes pos)
+data MoreBytes blit pos = NoMoreBytes | MoreBytes !pos !(Bytes blit pos)
 
 -----
 
-data Text pos neseq =
-    forall j. Suppressor !pos !pos (Joiner pos neseq j) (Text pos neseq)
+data Text neseq tlit pos =
+    forall j. Suppressor !pos !pos (Joiner neseq tlit pos j) (Text neseq tlit pos)
   |
-    TextLit !Quote !pos !pos (MoreText pos neseq)
+    TextLit !Quote !tlit !pos !pos (MoreText neseq tlit pos)
 
 data Quote =
     DoubleQuote
   |
     MultiQuote !(Four' D10)
 
-data MoreText pos neseq = NoMoreText | forall j. MoreText !pos (Joiner pos neseq j) (Text pos neseq)
+data MoreText neseq tlit pos = NoMoreText | forall j. MoreText !pos (Joiner neseq tlit pos j) (Text neseq tlit pos)
 
 data JOINER =
     -- | a joiner that can only be followed by escapes
@@ -95,10 +97,10 @@ data JOINER =
 -- | a joiner, excluding the position of its @<@
 --
 -- The index of a 'Joiner' indicates what /preceded/ it.
-data Joiner :: Type -> (Type -> Type) -> JOINER -> Type where
-    NilJoiner         :: !pos                                         -> Joiner pos neseq j
-    ConsJoinerText    :: !pos -> !pos          -> Joiner pos neseq Jt -> Joiner pos neseq Je
-    ConsJoinerEscapes :: !(neseq (Escape pos)) -> Joiner pos neseq Je -> Joiner pos neseq Jt
+data Joiner :: (Type -> Type) -> Type -> Type -> JOINER -> Type where
+    NilJoiner         :: !pos                                              -> Joiner neseq tlit pos j
+    ConsJoinerText    :: !tlit -> !pos -> !pos -> Joiner neseq tlit pos Jt -> Joiner neseq tlit pos Je
+    ConsJoinerEscapes :: !(neseq (Escape pos)) -> Joiner neseq tlit pos Je -> Joiner neseq tlit pos Jt
 
 data Escape pos = MkEscape !pos !Four
 
@@ -111,51 +113,68 @@ data SequencePart pos a =
 
 -----
 
-class (Show (BytesAnno anno), Show (NumberAnno anno), Show (SequenceAnno anno), Show (SymbolAnno anno), Show (TextAnno anno)) => ShowAnno anno
-class (Eq (BytesAnno anno), Eq (NumberAnno anno), Eq (SequenceAnno anno), Eq (SymbolAnno anno), Eq (TextAnno anno)) => EqAnno anno
-
 deriving instance Show P
-deriving instance (ShowAnno anno, Show pos, Show (neseq (Escape pos)), Show (seq (SequencePart pos (Matter anno pos neseq seq)))) => Show (Matter anno pos neseq seq)
+deriving instance Show X
+deriving instance (Show pos, Show (b pos), Show (n pos), Show (s pos), Show (t pos), Show (seq (SequencePart pos (Matter seq b n s t pos)))) => Show (Matter seq b n s t pos)
+deriving instance (Show pos, Show slit) => Show (Symbol slit pos)
 deriving instance (Show pos, Show a) => Show (ClosePin pos a)
-deriving instance (ShowAnno anno, Show pos, Show (neseq (Escape pos))) => Show (Flat anno pos neseq)
-deriving instance Show pos => Show (Bytes pos)
-deriving instance Show pos => Show (MoreBytes pos)
-deriving instance Show pos => Show (Number pos)
+deriving instance (Show pos, Show (b pos), Show (n pos), Show (s pos), Show (t pos)) => Show (Flat b n s t pos)
+deriving instance (Show pos, Show blit) => Show (Bytes blit pos)
+deriving instance (Show pos, Show blit) => Show (MoreBytes blit pos)
+deriving instance (Show pos, Show nlit) => Show (Number nlit pos)
 deriving instance Show pos => Show (MaybeFraction pos)
 deriving instance Show pos => Show (MaybeExponent pos)
-deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Text pos neseq)
+deriving instance (Show pos, Show (neseq (Escape pos)), Show tlit) => Show (Text neseq tlit pos)
 deriving instance Show Quote
-deriving instance (Show pos, Show (neseq (Escape pos))) => Show (MoreText pos neseq)
-deriving instance (Show pos, Show (neseq (Escape pos))) => Show (Joiner pos neseq j)
+deriving instance (Show pos, Show (neseq (Escape pos)), Show tlit) => Show (MoreText neseq tlit pos)
+deriving instance (Show pos, Show (neseq (Escape pos)), Show tlit) => Show (Joiner neseq tlit pos j)
 deriving instance Show pos => Show (Escape pos)
 deriving instance (Show pos, Show a) => Show (SequencePart pos a)
 
 deriving instance Eq P
-deriving instance (EqAnno anno, Eq pos, Eq (neseq (Escape pos)), Eq (seq (SequencePart pos (Matter anno pos neseq seq)))) => Eq (Matter anno pos neseq seq)
+deriving instance Eq X
+deriving instance (Eq pos, Eq (seq (SequencePart pos (Matter seq b n s t pos))), Eq (b pos), Eq (n pos), Eq (s pos), Eq (t pos)) => Eq (Matter seq b n s t pos)
+deriving instance (Eq pos, Eq slit) => Eq (Symbol slit pos)
 deriving instance (Eq pos, Eq a) => Eq (ClosePin pos a)
-deriving instance (EqAnno anno, Eq pos, Eq (neseq (Escape pos))) => Eq (Flat anno pos neseq)
-deriving instance Eq pos => Eq (Bytes pos)
-deriving instance Eq pos => Eq (MoreBytes pos)
-deriving instance Eq pos => Eq (Number pos)
+deriving instance (Eq pos, Eq (b pos), Eq (n pos), Eq (s pos), Eq (t pos)) => Eq (Flat b n s t pos)
+deriving instance (Eq pos, Eq blit) => Eq (Bytes blit pos)
+deriving instance (Eq pos, Eq blit) => Eq (MoreBytes blit pos)
+deriving instance (Eq pos, Eq nlit) => Eq (Number nlit pos)
 deriving instance Eq pos => Eq (MaybeFraction pos)
 deriving instance Eq pos => Eq (MaybeExponent pos)
-instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Text pos neseq) where
+instance          (Eq pos, Eq (neseq (Escape pos)), Eq tlit) => Eq (Text neseq tlit pos) where
     Suppressor p1 p1' j1 txt1 == Suppressor p2 p2' j2 txt2 = p1 == p2 && p1' == p2' && joinerEquality j1 j2 && txt1 == txt2
-    TextLit q1 l1 r1 more1 == TextLit q2 l2 r2 more2 = q1 == q2 && l1 == l2 && r1 == r2 && more1 == more2
+    TextLit q1 tlit1 l1 r1 more1 == TextLit q2 tlit2 l2 r2 more2 = q1 == q2 && tlit1 == tlit2 && l1 == l2 && r1 == r2 && more1 == more2
     _ == _ = False
 deriving instance Eq Quote
-instance (Eq pos, Eq (neseq (Escape pos))) => Eq (MoreText pos neseq) where
+instance          (Eq pos, Eq (neseq (Escape pos)), Eq tlit) => Eq (MoreText neseq tlit pos) where
     NoMoreText == NoMoreText = True
     MoreText p1 j1 txt1 == MoreText p2 j2 txt2 = p1 == p2 && joinerEquality j1 j2 && txt1 == txt2
     _ == _ = False
-deriving instance (Eq pos, Eq (neseq (Escape pos))) => Eq (Joiner pos neseq j)
+deriving instance (Eq pos, Eq (neseq (Escape pos)), Eq tlit) => Eq (Joiner neseq tlit pos j)
 deriving instance Eq pos => Eq (Escape pos)
 deriving instance (Eq pos, Eq a) => Eq (SequencePart pos a)
 
+deriving instance Functor (Symbol b)
 deriving instance Functor (ClosePin pos)
+deriving instance (Functor b, Functor n, Functor s, Functor t) => Functor (Flat b n s t)
+deriving instance Functor (Bytes blit)
+deriving instance Functor (MoreBytes blit)
+deriving instance Functor (Number n)
+deriving instance Functor MaybeFraction
+deriving instance Functor MaybeExponent
+instance          Functor neseq => Functor (Text neseq t) where
+    fmap f = \case
+        Suppressor p p' j txt -> Suppressor (f p) (f p') (mapPosJoiner f j) (fmap f txt)
+        TextLit q tlit l r more -> TextLit q tlit (f l) (f r) (fmap f more)
+instance          Functor neseq => Functor (MoreText neseq t) where
+    fmap f = \case
+        NoMoreText -> NoMoreText
+        MoreText p j t -> MoreText (f p) (mapPosJoiner f j) (fmap f t)
+deriving instance Functor Escape
 deriving instance Functor (SequencePart pos)
 
-instance TestEquality (Joiner pos neseq) where
+instance          TestEquality (Joiner neseq tlit pos) where
     testEquality = curry $ \case
         (NilJoiner{}        , NilJoiner{}        ) -> Nothing
         (ConsJoinerText{}   , ConsJoinerText{}   ) -> Just Refl
@@ -163,22 +182,28 @@ instance TestEquality (Joiner pos neseq) where
         _ -> Nothing
 
 -- | Note that the arguments can have different indices
-joinerEquality :: (Eq pos, Eq (neseq (Escape pos))) => Joiner pos neseq x -> Joiner pos neseq y -> Bool
+joinerEquality :: (Eq pos, Eq (neseq (Escape pos)), Eq tlit) => Joiner neseq tlit pos x -> Joiner neseq tlit pos y -> Bool
 joinerEquality = curry $ \case
     (NilJoiner p1                 , NilJoiner p2                 ) -> p1 == p2
-    (ConsJoinerText l1 r1 j1      , ConsJoinerText l2 r2 j2      ) -> l1 == l2 && r1 == r2 && joinerEquality j1 j2
+    (ConsJoinerText t1 l1 r1 j1   , ConsJoinerText t2 l2 r2 j2   ) -> t1 == t2 && l1 == l2 && r1 == r2 && joinerEquality j1 j2
     (ConsJoinerEscapes escapes1 j1, ConsJoinerEscapes escapes2 j2) -> escapes1 == escapes2 && joinerEquality j1 j2
     _ -> False
+
+mapPosJoiner :: Functor neseq => (pos -> pos') -> Joiner neseq tlit pos x -> Joiner neseq tlit pos' x
+mapPosJoiner f = \case
+    NilJoiner p -> NilJoiner (f p)
+    ConsJoinerText t l r j -> ConsJoinerText t (f l) (f r) (mapPosJoiner f j)
+    ConsJoinerEscapes escapes j -> ConsJoinerEscapes (fmap (fmap f) escapes) (mapPosJoiner f j)
 
 -----
 
 -- | The 'F.Base' functor of 'Matter'
-data MatterF anno pos neseq seq a =
-    FlatF (Flat anno pos neseq)
+data MatterF seq b n s t pos a =
+    FlatF (Flat b n s t pos)
   |
-    VariantF !(SymbolAnno anno) !pos !pos a
+    VariantF !(s pos) !pos !pos a
   |
-    SequenceF !(SequenceAnno anno) !pos (seq (SequencePart pos a)) !pos
+    SequenceF !pos (seq (SequencePart pos a)) !pos
   |
     MetaGtF !pos a !pos !(ClosePin pos a)
   |
@@ -186,114 +211,75 @@ data MatterF anno pos neseq seq a =
   |
     PinMetaLtF !pos a !pos !pos a !pos
 
-deriving instance Functor seq => Functor (MatterF anno pos neseq seq)
+deriving instance Functor seq => Functor (MatterF seq b n s t pos)
 
 -- | Project one layer of 'MatterF'
-project :: Matter anno pos neseq seq -> MatterF anno pos neseq seq (Matter anno pos neseq seq)
+project :: Matter seq b n s t pos -> MatterF seq b n s t pos (Matter seq b n s t pos)
 {-# INLINE project #-}
 project = \case
     Flat flt -> FlatF flt
-    Variant anno l r x -> VariantF anno l r x
-    Sequence anno l xs r -> SequenceF anno l xs r
+    Variant s l r x -> VariantF s l r x
+    Sequence l xs r -> SequenceF l xs r
     MetaGT l x r y -> MetaGtF l x r y
     Paren l x r -> ParenF l x r
     PinMetaLT l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
 
 -- | Inverse of 'project'
-embed :: MatterF anno pos neseq seq (Matter anno pos neseq seq) -> Matter anno pos neseq seq
+embed :: MatterF seq b n s t pos (Matter seq b n s t pos) -> Matter seq b n s t pos
 {-# INLINE embed #-}
 embed = \case
     FlatF flt -> Flat flt
-    VariantF anno l r x -> Variant anno l r x
-    SequenceF anno l xs r -> Sequence anno l xs r
+    VariantF s l r x -> Variant s l r x
+    SequenceF l xs r -> Sequence l xs r
     MetaGtF l x r y -> MetaGT l x r y
     ParenF l x r -> Paren l x r
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLT l1 x r1 l2 y r2
 
-type instance F.Base (Matter anno pos neseq seq) = MatterF anno pos neseq seq
-instance Functor seq => F.Recursive (Matter anno pos neseq seq) where project = project
-instance Functor seq => F.Corecursive (Matter anno pos neseq seq) where embed = embed
+type instance F.Base (Matter seq b n s t pos) = MatterF seq b n s t pos
+instance Functor seq => F.Recursive (Matter seq b n s t pos) where project = project
+instance Functor seq => F.Corecursive (Matter seq b n s t pos) where embed = embed
 
 -- | Specialization of 'F.fold' from "Data.Functor.Foldable"
-fold :: Functor seq => (MatterF anno pos neseq seq a -> a) -> Matter anno pos neseq seq -> a
+fold :: Functor seq => (MatterF seq b n s t pos a -> a) -> Matter seq b n s t pos -> a
 {-# INLINE fold #-}
 fold = F.fold
 
 -- | Specialization of 'F.unfold' from "Data.Functor.Foldable"
-unfold :: Functor seq => (a -> MatterF anno pos neseq seq a) -> a -> Matter anno pos neseq seq
+unfold :: Functor seq => (a -> MatterF seq b n s t pos a) -> a -> Matter seq b n s t pos
 unfold = F.unfold
 
 mapSequence ::
-    (SequenceAnno anno -> seq (SequencePart pos a) -> seq' (SequencePart pos a))
+    (seq (SequencePart pos a) -> seq' (SequencePart pos a))
  ->
-    MatterF anno pos neseq seq a
+    MatterF seq  b n s t pos a
  ->
-    MatterF anno pos neseq seq' a
+    MatterF seq' b n s t pos a
 {-# INLINE mapSequence #-}
 mapSequence f = \case
     FlatF flt -> FlatF flt
-    VariantF anno l r x -> VariantF anno l r x
-    SequenceF anno l xs r -> SequenceF anno l (f anno xs) r
+    VariantF s l r x -> VariantF s l r x
+    SequenceF l xs r -> SequenceF l (f xs) r
     MetaGtF l x r y -> MetaGtF l x r y
     ParenF l x r -> ParenF l x r
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
 
 mapPositions ::
-  forall anno pos pos' seq neseq a.
-        (Functor seq, Functor neseq)
+        (Functor seq, Functor b, Functor n, Functor s, Functor t)
      =>
         (pos -> pos')
      ->
-        MatterF anno pos neseq seq a
+        MatterF seq b n s t pos  a
      ->
-        MatterF anno pos' neseq seq a
+        MatterF seq b n s t pos' a
 {-# INLINE mapPositions #-}
 mapPositions f = \case
-    FlatF flt -> FlatF (flat flt)
-    VariantF anno l r x -> VariantF anno (f l) (f r) x
-    SequenceF anno l xs r -> SequenceF anno (f l) (fmap sequencePart xs) (f r)
+    FlatF flt -> FlatF (fmap f flt)
+    VariantF s l r x -> VariantF (fmap f s) (f l) (f r) x
+    SequenceF l xs r -> SequenceF (f l) (fmap sequencePart xs) (f r)
     MetaGtF l x r y -> MetaGtF (f l) x (f r) (closePin y)
     ParenF l x r -> ParenF (f l) x (f r)
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF (f l1) x (f r1) (f l2) y (f r2)
   where
-    flat = \case
-        Atom anno l r ->
-            Atom anno (f l) (f r)
-        Bytes anno (BytesLit l r more) ->
-            Bytes anno $ BytesLit (f l) (f r) (moreBytes more)
-        Number anno (NumberLit mbSgn l r fpart epart) ->
-            Number anno $ NumberLit mbSgn (f l) (f r) (fractionPart fpart) (exponentPart epart)
-        Text anno txt ->
-            Text anno (text txt)
-
-    moreBytes = \case
-        NoMoreBytes -> NoMoreBytes
-        MoreBytes p (BytesLit l r more) -> MoreBytes (f p) $ BytesLit (f l) (f r) (moreBytes more)
-
-    fractionPart = \case
-        NothingFraction -> NothingFraction
-        JustFraction l r -> JustFraction (f l) (f r)
-
-    exponentPart = \case
-        NothingExponent -> NothingExponent
-        JustExponent mbSgn l r -> JustExponent mbSgn (f l) (f r)
-
-    text = \case
-        Suppressor p1 p2 j txt -> Suppressor (f p1) (f p2) (joiner j) (text txt)
-        TextLit q l r more -> TextLit q (f l) (f r) (moreText more)
-
-    joiner :: Joiner pos neseq j -> Joiner pos' neseq j
-    joiner = \case
-        NilJoiner p -> NilJoiner (f p)
-        ConsJoinerText l r j -> ConsJoinerText (f l) (f r) (joiner j)
-        ConsJoinerEscapes escapes j -> ConsJoinerEscapes (fmap escape escapes) (joiner j)
-
-    escape (MkEscape p sz) = MkEscape (f p) sz
-
-    moreText = \case
-        NoMoreText -> NoMoreText
-        MoreText p j txt -> MoreText (f p) (joiner j) (text txt)
-
     sequencePart = \case
         Item x -> Item x
         MetaEQ l x r -> MetaEQ (f l) x (f r)
@@ -303,37 +289,34 @@ mapPositions f = \case
         OnlyClosePin l y r -> OnlyClosePin (f l) y (f r)
         BothPins l1 y1 r1 l2 y2 r2 -> BothPins (f l1) y1 (f r1) (f l2) y2 (f r2)
 
-mapAnno ::
-  forall anno anno' pos seq neseq a.
+mapBNST ::
         Functor seq
      =>
-        (BytesAnno anno -> BytesAnno anno')
+        (b pos -> b' pos)
      ->
-        (NumberAnno anno -> NumberAnno anno')
+        (n pos -> n' pos)
      ->
-        (SequenceAnno anno -> SequenceAnno anno')
+        (s pos -> s' pos)
      ->
-        (SymbolAnno anno -> SymbolAnno anno')
+        (t pos -> t' pos)
      ->
-        (TextAnno anno -> TextAnno anno')
+        MatterF seq b  n  s  t  pos a
      ->
-        MatterF anno pos neseq seq a
-     ->
-        MatterF anno' pos neseq seq a
-{-# INLINE mapAnno #-}
-mapAnno fbytes fnum fseq fsym ftext = \case
+        MatterF seq b' n' s' t' pos a
+{-# INLINE mapBNST #-}
+mapBNST fbytes fnum fsym ftext = \case
     FlatF flt -> FlatF (flat flt)
-    VariantF anno l r x -> VariantF (fsym anno) l r x
-    SequenceF anno l xs r -> SequenceF (fseq anno) l (fmap sequencePart xs) r
+    VariantF s l r x -> VariantF (fsym s) l r x
+    SequenceF l xs r -> SequenceF l (fmap sequencePart xs) r
     MetaGtF l x r y -> MetaGtF l x r (closePin y)
     ParenF l x r -> ParenF l x r
     PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
   where
     flat = \case
-        Atom anno l r -> Atom (fsym anno) l r
-        Bytes anno bytes -> Bytes (fbytes anno) bytes
-        Number anno number -> Number (fnum anno) number
-        Text anno txt -> Text (ftext anno) txt
+        Atom s l r -> Atom (fsym s) l r
+        Bytes b -> Bytes (fbytes b)
+        Number n -> Number (fnum n)
+        Text t -> Text (ftext t)
 
     sequencePart = \case
         Item x -> Item x

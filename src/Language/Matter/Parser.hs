@@ -1,5 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -15,16 +17,7 @@
 {-# OPTIONS_GHC -fmax-pmcheck-models=60 #-}
 
 module Language.Matter.Parser (
-    Anno,
-    ST.BytesAnno,
-    ST.NumberAnno,
-    ST.TextAnno,
     MatterParse (..),
-    bytesAnnoSize,
-    sequenceAnnoBothCount,
-    sequenceAnnoItemCount,
-    sequenceAnnoMetaEqCount,
-    textAnnoCounts,
 
     Stk,
     emptyStk,
@@ -37,6 +30,16 @@ module Language.Matter.Parser (
     eof,
     snoc,
     snocs,
+
+    Bytes (..),
+    Number (..),
+    Symbol (..),
+    Text (..),
+    Seq (..),
+    bytesAnnoSize,
+    bytesForget,
+    textAnnoCounts,
+    textForget,
   ) where
 
 import Data.List.NonEmpty (NonEmpty)
@@ -49,50 +52,39 @@ import GHC.Show (showSpace)
 import Language.Matter.Tokenizer (OdToken (..), Pos (..), SdToken (..), Token (..))
 import Language.Matter.Tokenizer qualified as T
 import Language.Matter.Tokenizer.Counting (MaybeSign, forgetFour', valueFour)
+import Language.Matter.SyntaxTree (X (..))
 import Language.Matter.SyntaxTree qualified as ST
 
-data Anno
-
-data instance ST.BytesAnno Anno =
-    MkBytesAnno !Word32
+data Bytes pos =
+    -- | Num bytes, /not/ num nibbles (which would be double)
+    MkBytes !Word32 !(ST.Bytes X pos)
   deriving (Eq, Show)
 
--- | How many bytes total, after all the joining
-bytesAnnoSize :: ST.BytesAnno Anno -> Word32
-bytesAnnoSize (MkBytesAnno n) = n
+bytesAnnoSize :: Bytes pos -> Word32
+bytesAnnoSize (MkBytes byteSize _) = byteSize
 
--- | TODO digit counts?
-data instance ST.NumberAnno Anno =
-    MkNumberAnno
+bytesForget :: Bytes pos -> ST.Bytes X pos
+bytesForget (MkBytes _byteSize b) = b
+
+data Number pos = MkNumber !(ST.Number X pos)
   deriving (Eq, Show)
 
-data instance ST.SequenceAnno Anno =
-    MkSequenceAnno !Word32 !Word32
+data Symbol pos = MkSymbol !(ST.Symbol X pos)
   deriving (Eq, Show)
 
-sequenceAnnoItemCount :: ST.SequenceAnno Anno -> Word32
-sequenceAnnoItemCount (MkSequenceAnno n _nmeta) = n
-
-sequenceAnnoMetaEqCount :: ST.SequenceAnno Anno -> Word32
-sequenceAnnoMetaEqCount (MkSequenceAnno _n nmeta) = nmeta
-
-sequenceAnnoBothCount :: ST.SequenceAnno Anno -> Word32
-sequenceAnnoBothCount (MkSequenceAnno n nmeta) = n + nmeta
-
-data instance ST.SymbolAnno Anno =
-    MkSymbolAnno
+data Text pos = MkText !Pos !(ST.Text NonEmpty X pos)
   deriving (Eq, Show)
 
-data instance ST.TextAnno Anno =
-    MkTextAnno !Pos
-  deriving (Eq, Show)
+textAnnoCounts :: Text pos -> Pos
+textAnnoCounts (MkText pos _) = pos
 
--- | The total counts, after all the joining
-textAnnoCounts :: ST.TextAnno Anno -> Pos
-textAnnoCounts (MkTextAnno pos) = pos
+textForget :: Text pos -> ST.Text NonEmpty X pos
+textForget (MkText _pos t) = t
 
-instance ST.ShowAnno Anno
-instance ST.EqAnno Anno
+data Seq a =
+    -- | Num 'ST.Item's and num 'ST.MetaEQ's
+    MkSeq !Word32 !Word32 !(Vector a)
+  deriving (Eq, Show, Foldable, Functor)
 
 -----
 
@@ -109,8 +101,8 @@ data UT :: FLAT -> Type where
     SingU   :: UT U
     SingT   :: UT T
 
-instance SingI (UT U)   where singI = SingU
-instance SingI (UT T)   where singI = SingT
+instance SingI (UT U) where singI = SingU
+instance SingI (UT T) where singI = SingT
 
 utOf :: SingI (UT x) => Flat x -> UT x
 utOf _fstk = singI
@@ -171,15 +163,10 @@ data Stk a =
     OpenVariant !Pos !Pos (Stk a)   -- ^ won't pop
   |
     -- | [ a b c
-    --
-    -- The 'Word32's count 'Item's and 'MetaEQ's
-    OpenSequence !Pos (MatterSeq a (ST.SequencePart Pos a)) !Word32 !Word32 (Stk a)   -- ^ won't pop
+    OpenSequence !Pos (MatterSeq a (ST.SequencePart Pos a)) (Stk a)   -- ^ won't pop
   |
     -- | [ a b c {=
-    --
-    -- The 'Word32's count 'Item's and 'MetaEQ's (excluding the
-    -- unclosed one at the top of the stack)
-    Sequence_OpenMetaEQ !Pos (MatterSeq a (ST.SequencePart Pos a)) !Word32 !Word32 !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    Sequence_OpenMetaEQ !Pos (MatterSeq a (ST.SequencePart Pos a)) !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | {> and {> a
     OpenMetaGT !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
@@ -214,7 +201,7 @@ class (
         MatterParse a where
     data MatterSeq a :: Type -> Type
 
-    parseAlgebra :: ST.MatterF Anno Pos NonEmpty (MatterSeq a) a -> a
+    parseAlgebra :: ST.MatterF (MatterSeq a) Bytes Number Symbol Text Pos a -> a
 
     emptyMatterSeq :: MatterSeq a (ST.SequencePart Pos a)
     snocMatterSeq ::
@@ -227,19 +214,21 @@ class (
 emptyStk :: Stk a
 emptyStk = Empty Nothing
 
-instance MatterParse (ST.Matter Anno Pos NonEmpty Vector) where
-    newtype MatterSeq (ST.Matter Anno Pos NonEmpty Vector) a =
-        MkMatterSeq [a]
+instance MatterParse (ST.Matter Seq Bytes Number Symbol Text Pos) where
+    data MatterSeq (ST.Matter Seq Bytes Number Symbol Text Pos) a =
+        MkMatterSeq !Word32 !Word32 [a]
       deriving (Show, Eq)
 
     parseAlgebra =
         ST.embed . ST.mapSequence f
       where
-        f anno (MkMatterSeq xs) =
-            fromIntegral (sequenceAnnoBothCount anno) `V.fromListN` reverse xs
+        f (MkMatterSeq nitem nmeta xs) =
+            MkSeq nitem nmeta $ V.fromListN (fromIntegral (nitem + nmeta)) $ reverse xs
 
-    emptyMatterSeq = MkMatterSeq []
-    snocMatterSeq (MkMatterSeq xs) x = MkMatterSeq (x : xs)
+    emptyMatterSeq = MkMatterSeq 0 0[]
+    snocMatterSeq (MkMatterSeq nitem nmeta xs) = \case
+        x@ST.Item{}   -> MkMatterSeq (nitem + 1) nmeta (x : xs)
+        x@ST.MetaEQ{} -> MkMatterSeq nitem (nmeta + 1) (x : xs)
 
 snoc :: MatterParse a => Pos -> Pos -> Stk a -> Token -> Maybe (Stk a)
 snoc l r = curry $ \case
@@ -248,9 +237,9 @@ snoc l r = curry $ \case
     (Flat (IntegerPart mbSign l1 r1) stk, OdToken OdFractionPart) ->
         Just $ Flat (FractionPart l r $ IntegerPart mbSign l1 r1) stk
     (Flat (FractionPart l2 r2 (IntegerPart mbSign1 l1 r1)) stk, OdToken (OdExponentPart mbSign)) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit mbSign1 l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent mbSign l r)
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number $ MkNumber $ ST.NumberLit MkX mbSign1 l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent mbSign l r)
     (Flat (IntegerPart mbSign1 l1 r1) stk, OdToken (OdExponentPart mbSign)) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit mbSign1 l1 r1 ST.NothingFraction (ST.JustExponent mbSign l r)
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number $ MkNumber $ ST.NumberLit MkX mbSign1 l1 r1 ST.NothingFraction (ST.JustExponent mbSign l r)
 
     (_stk, OdToken OdFractionPart) -> Nothing
     (_stk, OdToken OdExponentPart{}) -> Nothing
@@ -349,7 +338,7 @@ snoc l r = curry $ \case
 
     -- @
     (stk, OdToken OdAtom) ->
-        push (simplify stk) $ parseAlgebra $ ST.FlatF $ ST.Atom MkSymbolAnno l r
+        push (simplify stk) $ parseAlgebra $ ST.FlatF $ ST.Atom (MkSymbol (ST.MkSymbol MkX)) l r
     -- 0
     (stk, OdToken (OdIntegerPart mbSign)) ->
         Just $ Flat (IntegerPart mbSign l r) $ simplify stk
@@ -371,22 +360,22 @@ snoc l r = curry $ \case
         Just $ OpenVariant l r $ simplify stk
     -- [ ]
     (stk, SdToken SdOpenSeq) ->
-        Just $ OpenSequence l emptyMatterSeq 0 0 $ simplify stk
+        Just $ OpenSequence l emptyMatterSeq $ simplify stk
     (stk, SdToken SdCloseSeq) ->
         case simplify stk of
-            OpenSequence p1 acc n nmeta stk' ->
-                push stk' $ parseAlgebra $ ST.SequenceF (MkSequenceAnno n nmeta) p1 acc l
+            OpenSequence p1 acc stk' ->
+                push stk' $ parseAlgebra $ ST.SequenceF p1 acc l
             _ -> Nothing
     -- {= =}
     (stk, SdToken (SdOpenMeta EQ)) -> do
         case simplify stk of
-            OpenSequence p1 acc n nmeta stk' ->
-                Just $ Sequence_OpenMetaEQ p1 acc n nmeta l Nothing stk'
+            OpenSequence p1 acc stk' ->
+                Just $ Sequence_OpenMetaEQ p1 acc l Nothing stk'
             _ -> Nothing
     (stk, SdToken (SdCloseMeta EQ)) -> do
         case simplify stk of
-            Sequence_OpenMetaEQ p1 acc n nmeta p2 (Just m) stk' ->
-                Just $ OpenSequence p1 (snocMatterSeq acc $ ST.MetaEQ p2 m l) n (nmeta + 1) stk'
+            Sequence_OpenMetaEQ p1 acc p2 (Just m) stk' ->
+                Just $ OpenSequence p1 (snocMatterSeq acc $ ST.MetaEQ p2 m l) stk'
             _ -> Nothing
     -- {> >}
     (stk, SdToken (SdOpenMeta GT)) ->
@@ -467,16 +456,16 @@ pop = \case
     
 popFlat :: MatterParse a => Flat x -> Maybe a
 popFlat = \case
-    IntegerPart mbSign l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit mbSign l r ST.NothingFraction ST.NothingExponent
-    FractionPart l2 r2 (IntegerPart mbSign l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number MkNumberAnno $ ST.NumberLit mbSign l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
+    IntegerPart mbSign l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number $ MkNumber $ ST.NumberLit MkX mbSign l r ST.NothingFraction ST.NothingExponent
+    FractionPart l2 r2 (IntegerPart mbSign l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number $ MkNumber $ ST.NumberLit MkX mbSign l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
     Suppressor{} -> Nothing
-    x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ uncurry (ST.Text . finalizeTA) $ popT mempty ST.NoMoreText x
+    x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text $ finalizeTA $ popT mempty ST.NoMoreText x
     OpenTextJoiner{} -> Nothing
     JoinerText{} -> Nothing
     Escapes{} -> Nothing
     CloseTextJoiner{} -> Nothing
     MoreSuppressor{} -> Nothing
-    x@MoreText{} -> Just $ parseAlgebra $ ST.FlatF $ uncurry (ST.Text . finalizeTA) $ popT mempty ST.NoMoreText x
+    x@MoreText{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text $ finalizeTA $ popT mempty ST.NoMoreText x
     x@Bytes{} -> Just $ parseAlgebra $ ST.FlatF $ popBytes 0 ST.NoMoreBytes x
     OpenBytesJoiner{} -> Nothing
     CloseBytesJoiner{} -> Nothing
@@ -485,15 +474,15 @@ popFlat = \case
 newtype TA = MkTA Pos
   deriving (Monoid, Semigroup)
 
-finalizeTA :: TA -> ST.TextAnno Anno
-finalizeTA (MkTA x) = MkTextAnno x
+finalizeTA :: (TA, ST.Text NonEmpty X Pos) -> Text Pos
+finalizeTA (MkTA x, txt) = MkText x txt
 
-popT :: TA -> ST.MoreText Pos NonEmpty -> Flat T -> (TA, ST.Text Pos NonEmpty)
+popT :: TA -> ST.MoreText NonEmpty X Pos -> Flat T -> (TA, ST.Text NonEmpty X Pos)
 popT !anno acc = \case
-    Text q l r -> (textAnno anno (Just q) l r, ST.TextLit q l r acc)
+    Text q l r -> (textAnno anno (Just q) l r, ST.TextLit q MkX l r acc)
     MoreText q l r (CloseTextJoiner p fstk) -> case popSomeJo (ST.NilJoiner p) fstk of
         PoppedTextJoiner janno jp j fstk' ->
-            popUT janno jp j (textAnno anno (Just q) l r) (ST.TextLit q l r acc) fstk'
+            popUT janno jp j (textAnno anno (Just q) l r) (ST.TextLit q MkX l r acc) fstk'
 
 textAnno :: TA -> Maybe ST.Quote -> Pos -> Pos -> TA
 textAnno (MkTA acc) mbQ (MkPos x y) pos =
@@ -511,9 +500,9 @@ textAnno (MkTA acc) mbQ (MkPos x y) pos =
             MkPos (negate n) (negate n)
 
 data PoppedTextJoiner where
-    PoppedTextJoiner :: SingI (UT x) => !TA -> !Pos -> !(ST.Joiner Pos NonEmpty j) -> !(Flat x) -> PoppedTextJoiner
+    PoppedTextJoiner :: SingI (UT x) => !TA -> !Pos -> !(ST.Joiner NonEmpty X Pos j) -> !(Flat x) -> PoppedTextJoiner
 
-popUT :: SingI (UT x) => TA -> Pos -> ST.Joiner Pos NonEmpty j -> TA -> ST.Text Pos NonEmpty -> Flat x -> (TA, ST.Text Pos NonEmpty)
+popUT :: SingI (UT x) => TA -> Pos -> ST.Joiner NonEmpty X Pos j -> TA -> ST.Text NonEmpty X Pos -> Flat x -> (TA, ST.Text NonEmpty X Pos)
 popUT !janno jp j !anno acc fstk = case (utOf fstk, fstk) of
 
     (SingU, Suppressor p) -> (anno, ST.Suppressor p jp j acc)
@@ -523,13 +512,13 @@ popUT !janno jp j !anno acc fstk = case (utOf fstk, fstk) of
 
     (SingT, fstk') -> popT (janno <> anno) (ST.MoreText jp j acc) fstk'
 
-popSomeJo :: ST.Joiner Pos NonEmpty j -> Flat (Jo j) -> PoppedTextJoiner
+popSomeJo :: ST.Joiner NonEmpty X Pos j -> Flat (Jo j) -> PoppedTextJoiner
 popSomeJo j = \case
     OpenTextJoiner p fstk -> PoppedTextJoiner mempty p j fstk
     fstk@JoinerText{} -> popJoJt mempty j fstk
     fstk@Escapes{} -> popJoJe mempty j fstk
 
-popJoJe :: TA -> ST.Joiner Pos NonEmpty ST.Je -> Flat (Jo ST.Je) -> PoppedTextJoiner
+popJoJe :: TA -> ST.Joiner NonEmpty X Pos ST.Je -> Flat (Jo ST.Je) -> PoppedTextJoiner
 popJoJe !janno j = \case
     OpenTextJoiner p fstk -> PoppedTextJoiner janno p j fstk
     Escapes escapes fstk -> popJoJt (escapesAnno janno escapes) (ST.ConsJoinerEscapes (NE.reverse escapes) j) fstk
@@ -540,16 +529,16 @@ escapesAnno (MkTA acc) escapes =
   where
     f (ST.MkEscape _pos sz) = MkPos {codePoints = 1, utf8Bytes = valueFour sz}
 
-popJoJt :: TA -> ST.Joiner Pos NonEmpty ST.Jt -> Flat (Jo ST.Jt) -> PoppedTextJoiner
+popJoJt :: TA -> ST.Joiner NonEmpty X Pos ST.Jt -> Flat (Jo ST.Jt) -> PoppedTextJoiner
 popJoJt !janno j = \case
     OpenTextJoiner p fstk -> PoppedTextJoiner janno p j fstk
-    JoinerText l r fstk -> popJoJe (textAnno janno Nothing l r) (ST.ConsJoinerText l r j) fstk
+    JoinerText l r fstk -> popJoJe (textAnno janno Nothing l r) (ST.ConsJoinerText MkX l r j) fstk
 
-popBytes :: Word32 -> ST.MoreBytes Pos -> Flat B -> ST.Flat Anno Pos NonEmpty
+popBytes :: Word32 -> ST.MoreBytes X Pos -> Flat B -> ST.Flat Bytes Number Symbol Text Pos
 popBytes !anno acc = \case
-    Bytes l r -> ST.Bytes (MkBytesAnno (anno + b l r)) $ ST.BytesLit l r acc
+    Bytes l r -> ST.Bytes $ MkBytes (anno + b l r) $ ST.BytesLit MkX l r acc
     MoreBytes l r (CloseBytesJoiner _r (OpenBytesJoiner p fstk)) ->
-        popBytes (anno + b l r) (ST.MoreBytes p $ ST.BytesLit l r acc) fstk
+        popBytes (anno + b l r) (ST.MoreBytes p $ ST.BytesLit MkX l r acc) fstk
   where
     b l r = div (T.posDiff r l - 2 {- 0x -}) 2 {- 2 nibbles per byte -}
 
@@ -564,12 +553,12 @@ push = flip $ \m -> \case
     Flat{} ->
         Nothing
     OpenVariant l r stk ->
-        push stk $ parseAlgebra $ ST.VariantF MkSymbolAnno l r m
-    OpenSequence p acc n nmeta stk ->
-        Just $ OpenSequence p (snocMatterSeq acc $ ST.Item m) (n + 1) nmeta stk
-    Sequence_OpenMetaEQ p1 acc n nmeta p2 mb stk ->
+        push stk $ parseAlgebra $ ST.VariantF (MkSymbol (ST.MkSymbol MkX)) l r m
+    OpenSequence p acc stk ->
+        Just $ OpenSequence p (snocMatterSeq acc $ ST.Item m) stk
+    Sequence_OpenMetaEQ p1 acc p2 mb stk ->
         case mb of
-            Nothing -> Just $ Sequence_OpenMetaEQ p1 acc n nmeta p2 (Just m) stk
+            Nothing -> Just $ Sequence_OpenMetaEQ p1 acc p2 (Just m) stk
             Just{} -> Nothing
     OpenMetaGT p mb stk ->
         case mb of
@@ -663,7 +652,7 @@ instance (Show (MatterSeq a (ST.SequencePart Pos a)), Show a) => Show (Stk a) wh
                          (showsPrec 11 b3_aVf))))))
     showsPrec
       a_aVg
-      (OpenSequence b1_aVh b2_aVi b3_aVj x y)
+      (OpenSequence b1_aVh b2_aVi b3_aVj)
       = showParen
           (a_aVg >= 11)
           ((showString "OpenSequence ") .
@@ -672,14 +661,10 @@ instance (Show (MatterSeq a (ST.SequencePart Pos a)), Show a) => Show (Stk a) wh
              showsPrec 11 b2_aVi
              . showSpace .
              (showsPrec 11 b3_aVj)
-             . showSpace .
-             (showsPrec 11 x)
-             . showSpace .
-             (showsPrec 11 y)
           )
     showsPrec
       a_aVk
-      (Sequence_OpenMetaEQ b1_aVl b2_aVm b3_aVn b4_aVo b5_aVp x y)
+      (Sequence_OpenMetaEQ b1_aVl b2_aVm b3_aVn b4_aVo b5_aVp)
       = showParen
           (a_aVk >= 11)
           ((.)
@@ -699,10 +684,6 @@ instance (Show (MatterSeq a (ST.SequencePart Pos a)), Show a) => Show (Stk a) wh
                                ((showsPrec 11 b4_aVo)
                                 . showSpace .
                                 (showsPrec 11 b5_aVp)
-                                . showSpace .
-                                (showsPrec 11 x)
-                                . showSpace .
-                                (showsPrec 11 y)
                                   ))))))))
     showsPrec
       a_aVq
