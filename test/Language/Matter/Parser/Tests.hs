@@ -344,15 +344,19 @@ prop_prettyThenParseIsSame' (g, m) =
   where
     forget =
         fold $ embed
-             . mapPositions
-                   (\MkPos{} -> MkP)
-             . mapSequence
-                   (\(P.MkSeq _nitem _nmeta xs) -> xs)
-             . mapBNST
-                   (\(P.MkBytes _w b) -> b)
-                   (\(P.MkNumber n) -> n)
-                   (\(P.MkSymbol s) -> s)
-                   (\(P.MkText _counts t) -> t)
+             . mapFuns MkFuns {
+                   seqFun = JustFun $ \(P.MkSeq _nitem _nmeta xs) -> xs
+                 ,
+                   bFun = JustFun $ \(P.MkBytes _w b) -> b
+                 ,
+                   nFun = JustFun $ \(P.MkNumber n) -> n
+                 ,
+                   sFun = JustFun $ \(P.MkSymbol s) -> s
+                 ,
+                   tFun = JustFun $ \(P.MkText _counts t) -> t
+                 ,
+                   posFun = JustFun $ \MkPos{} -> MkP
+                 }
 
     txt =
         runStateGen_ (mkStdGen g)

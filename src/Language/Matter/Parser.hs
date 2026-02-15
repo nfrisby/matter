@@ -58,7 +58,7 @@ import Language.Matter.SyntaxTree qualified as ST
 data Bytes pos =
     -- | Num bytes, /not/ num nibbles (which would be double)
     MkBytes !Word32 !(ST.Bytes X pos)
-  deriving (Eq, Show)
+  deriving (Eq, Functor, Show)
 
 bytesAnnoSize :: Bytes pos -> Word32
 bytesAnnoSize (MkBytes byteSize _) = byteSize
@@ -67,13 +67,13 @@ bytesForget :: Bytes pos -> ST.Bytes X pos
 bytesForget (MkBytes _byteSize b) = b
 
 data Number pos = MkNumber !(ST.Number X pos)
-  deriving (Eq, Show)
+  deriving (Eq, Functor, Show)
 
 data Symbol pos = MkSymbol !(ST.Symbol X pos)
-  deriving (Eq, Show)
+  deriving (Eq, Functor, Show)
 
 data Text pos = MkText !Pos !(ST.Text NonEmpty X pos)
-  deriving (Eq, Show)
+  deriving (Eq, Functor, Show)
 
 textAnnoCounts :: Text pos -> Pos
 textAnnoCounts (MkText pos _) = pos
@@ -220,7 +220,7 @@ instance MatterParse (ST.Matter Seq Bytes Number Symbol Text Pos) where
       deriving (Show, Eq)
 
     parseAlgebra =
-        ST.embed . ST.mapSequence f
+        ST.embed . ST.mapFuns ST.nothingFuns{ST.seqFun = ST.JustFun f}
       where
         f (MkMatterSeq nitem nmeta xs) =
             MkSeq nitem nmeta $ V.fromListN (fromIntegral (nitem + nmeta)) $ reverse xs

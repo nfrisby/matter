@@ -4,13 +4,17 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE NoFieldSelectors #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Language.Matter.SyntaxTree (module Language.Matter.SyntaxTree) where
 
+import Control.Category qualified as Cat
 import Data.Functor.Foldable qualified as F
 import Data.Kind (Type)
 import Data.Type.Equality ((:~:) (Refl), TestEquality (testEquality))
@@ -284,81 +288,97 @@ fold = F.fold
 unfold :: Functor seq => (a -> MatterF seq b n s t pos a) -> a -> Matter seq b n s t pos
 unfold = F.unfold
 
-mapSequence ::
-    (seq (SequencePart pos a) -> seq' (SequencePart pos a))
- ->
-    MatterF seq  b n s t pos a
- ->
-    MatterF seq' b n s t pos a
-{-# INLINE mapSequence #-}
-mapSequence f = \case
-    FlatF flt -> FlatF flt
-    VariantF s l r x -> VariantF s l r x
-    SequenceF l xs r -> SequenceF l (f xs) r
-    MetaGtF l x r y -> MetaGtF l x r y
-    ParenF l x r -> ParenF l x r
-    PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
+-----
 
-mapPositions ::
-        (Functor seq, Functor b, Functor n, Functor s, Functor t)
+infixr `MaybeFun`
+
+-- | A function that might observably be @id@
+data MaybeFun a b =
+    (a ~ b) => NothingFun
+  |
+    JustFun (a -> b)
+
+instance Cat.Category MaybeFun where
+    id = NothingFun
+    (.) = curry $ \case
+        (NothingFun, NothingFun) -> NothingFun
+        (f, g) -> JustFun $ maybeFun f . maybeFun g
+
+maybeFun :: MaybeFun a b -> a -> b
+maybeFun = \case
+    NothingFun -> id
+    JustFun f -> f
+
+fmapMaybeFun :: Functor f => MaybeFun a b -> MaybeFun (f a) (f b)
+fmapMaybeFun = \case
+    NothingFun -> NothingFun
+    JustFun f -> JustFun $ fmap f
+
+data Funs seq b n s t pos seq' b' n' s' t' pos' a = MkFuns {
+    seqFun :: seq (SequencePart pos a) `MaybeFun` seq' (SequencePart pos a)
+  ,
+    bFun :: b pos `MaybeFun` b' pos
+  ,
+    nFun :: n pos `MaybeFun` n' pos
+  ,
+    sFun :: s pos `MaybeFun` s' pos
+  ,
+    tFun :: t pos `MaybeFun` t' pos
+  ,
+    posFun :: pos `MaybeFun` pos'
+  }
+
+nothingFuns :: Funs seq b n s t pos seq b n s t pos a
+nothingFuns = MkFuns NothingFun NothingFun NothingFun NothingFun NothingFun NothingFun
+
+mapFuns ::
+  forall seq b n s t pos seq' b' n' s' t' qos a.
+        (Functor seq', Functor b', Functor n', Functor s', Functor t')
      =>
-        (pos -> pos')
+        Funs seq  b  n  s  t  pos
+             seq' b' n' s' t' qos a
      ->
-        MatterF seq b n s t pos  a
+        MatterF seq  b  n  s  t  pos  a
      ->
-        MatterF seq b n s t pos' a
-{-# INLINE mapPositions #-}
-mapPositions f = \case
-    FlatF flt -> FlatF (fmap f flt)
-    VariantF s l r x -> VariantF (fmap f s) (f l) (f r) x
-    SequenceF l xs r -> SequenceF (f l) (fmap sequencePart xs) (f r)
-    MetaGtF l x r y -> MetaGtF (f l) x (f r) (closePin y)
-    ParenF l x r -> ParenF (f l) x (f r)
-    PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF (f l1) x (f r1) (f l2) y (f r2)
+        MatterF seq' b' n' s' t' qos a
+{-# INLINE mapFuns #-}
+mapFuns funs =
+    case funs of
+        MkFuns NothingFun NothingFun NothingFun NothingFun NothingFun NothingFun -> id
+        _ -> \case
+            FlatF flt -> FlatF (flat flt)
+            VariantF s l r x -> VariantF (symbol s) (pos l) (pos r) x
+            SequenceF l xs r -> SequenceF (pos l) (sequenceParts $ sequ xs) (pos r)
+            MetaGtF l x r y -> MetaGtF (pos l) x (pos r) (closePin y)
+            ParenF l x r -> ParenF (pos l) x (pos r)
+            PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF (pos l1) x (pos r1) (pos l2) y (pos r2)
   where
-    sequencePart = \case
-        Item x -> Item x
-        MetaEQ l x r -> MetaEQ (f l) x (f r)
+    sequ   = maybeFun                             seqFun
+    bytes  = maybeFun $ fmapMaybeFun posFun Cat.. bFun
+    number = maybeFun $ fmapMaybeFun posFun Cat.. nFun
+    symbol = maybeFun $ fmapMaybeFun posFun Cat.. sFun
+    text   = maybeFun $ fmapMaybeFun posFun Cat.. tFun
+    pos    = maybeFun                             posFun
 
-    closePin = \case
-        NoClosePin y -> NoClosePin y
-        OnlyClosePin l y r -> OnlyClosePin (f l) y (f r)
-        BothPins l1 y1 r1 l2 y2 r2 -> BothPins (f l1) y1 (f r1) (f l2) y2 (f r2)
+    MkFuns {seqFun, bFun, nFun, sFun, tFun, posFun} = funs
 
-mapBNST ::
-        Functor seq
-     =>
-        (b pos -> b' pos)
-     ->
-        (n pos -> n' pos)
-     ->
-        (s pos -> s' pos)
-     ->
-        (t pos -> t' pos)
-     ->
-        MatterF seq b  n  s  t  pos a
-     ->
-        MatterF seq b' n' s' t' pos a
-{-# INLINE mapBNST #-}
-mapBNST fbytes fnum fsym ftext = \case
-    FlatF flt -> FlatF (flat flt)
-    VariantF s l r x -> VariantF (fsym s) l r x
-    SequenceF l xs r -> SequenceF l (fmap sequencePart xs) r
-    MetaGtF l x r y -> MetaGtF l x r (closePin y)
-    ParenF l x r -> ParenF l x r
-    PinMetaLtF l1 x r1 l2 y r2 -> PinMetaLtF l1 x r1 l2 y r2
-  where
-    flat = \case
-        Atom s l r -> Atom (fsym s) l r
-        Bytes b -> Bytes (fbytes b)
-        Number n -> Number (fnum n)
-        Text t -> Text (ftext t)
+    flat = case (bFun, nFun, sFun, tFun, posFun) of
+        (NothingFun, NothingFun, NothingFun, NothingFun, NothingFun) -> id
+        _ -> \case
+            Atom s l r -> Atom (symbol s) (pos l) (pos r)
+            Bytes b -> Bytes (bytes b)
+            Number n -> Number (number n)
+            Text t -> Text (text t)
 
-    sequencePart = \case
-        Item x -> Item x
-        MetaEQ l x r -> MetaEQ l x r
+    sequenceParts = case posFun of
+        NothingFun -> id
+        JustFun{} -> fmap $ \case
+            Item x -> Item x
+            MetaEQ l x r -> MetaEQ (pos l) x (pos r)
 
-    closePin = \case
-        NoClosePin y -> NoClosePin y
-        OnlyClosePin l y r -> OnlyClosePin l y r
-        BothPins l1 y1 r1 l2 y2 r2 -> BothPins l1 y1 r1 l2 y2 r2
+    closePin = case posFun of
+        NothingFun -> id
+        JustFun{} -> \case
+            NoClosePin y -> NoClosePin y
+            OnlyClosePin l y r -> OnlyClosePin (pos l) y (pos r)
+            BothPins l1 y1 r1 l2 y2 r2 -> BothPins (pos l1) y1 (pos r1) (pos l2) y2 (pos r2)
