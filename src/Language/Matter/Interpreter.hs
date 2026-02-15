@@ -35,11 +35,11 @@ import GHC.Word qualified as GHC
 import Language.Matter.SyntaxTree
 import Language.Matter.Tokenizer (MatterStream (slice, sliceShort), Pos (..))
 
--- | Useful both for 'Atom' and 'Variant'
+-- | Useful both for 'Atom' and 'Varinant'
 interpretSymbol :: MatterStream inp => inp -> Pos -> Pos -> TS.ShortText
-interpretSymbol inp x y =
+interpretSymbol inp l r =
     -- skip the @ or the #
-    sliceShort (x <> MkPos 1 1) y inp
+    sliceShort (l <> MkPos 1 1) r inp
 
 interpretBytes :: MatterStream inp => inp -> Maybe Word32 -> Bytes blit Pos -> Either String BA.ByteArray
 interpretBytes inp mbByteSize top =
@@ -214,13 +214,16 @@ pathedFmap inp path f = \case
     FlatF flt -> FlatF flt
     VariantF s l r x -> VariantF s l r $ flip f x $ SnocPath path $ VariantTurn $ interpretSymbol inp l r
     SequenceF p1 xs p2 -> SequenceF p1 (go xs) p2
-    MetaGtF p1 x p2 y -> MetaGtF p1 (flip f x $ SnocPath path MetaGtTurn) p2 $ case y of
-        NoClosePin y' -> NoClosePin (flip f y' $ SnocPath path ReferentGtTurn)
-        OnlyClosePin p3 y' p4 -> OnlyClosePin p3 (flip f y' $ SnocPath path ReferentGtTurn) p4
-        BothPins p3 y1 p4 p5 y2 p6->
-            BothPins
-               p3 (flip f y1 $ SnocPath path ReferentGtTurn `SnocPath` ReferentLtTurn) p4
-               p5 (flip f y2 $ SnocPath path ReferentGtTurn `SnocPath` MetaLtTurn    ) p6
+    MetaGtF p1 x p2 y ->
+        MetaGtF p1 (flip f x $ SnocPath path MetaGtTurn) p2 $ case y of
+            NoClosePin y' ->
+                NoClosePin (flip f y' $ SnocPath path ReferentGtTurn)
+            OnlyClosePin p3 y' p4 ->
+                OnlyClosePin p3 (flip f y' $ SnocPath path ReferentGtTurn) p4
+            BothPins p3 y1 p4 p5 y2 p6->
+                BothPins
+                   p3 (flip f y1 $ SnocPath path ReferentGtTurn `SnocPath` ReferentLtTurn) p4
+                   p5 (flip f y2 $ SnocPath path ReferentGtTurn `SnocPath` MetaLtTurn    ) p6
     ParenF p1 x p2 -> ParenF p1 (flip f x $ SnocPath path ParenTurn) p2
     PinMetaLtF p1 x p2 p3 y p4 ->
         PinMetaLtF

@@ -42,7 +42,7 @@ tests = do
             print sz
             g <- getStdGen
             -- TODO how to inject some unnecessary OdWhitespace tokens? Should not be adjacent to OdWhiteSpace.
-            TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: Matter Vector (Bytes X) (Number X) (Symbol X) (Text NonEmpty X) P)
+            TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: Matter Vector (Bytes X) Decimal (Symbol X) (Text NonEmpty X) P)
             putStrLn ""
     QC.sample' (QC.sized $ \sz -> (,) sz <$> G.generateMatter) >>= mapM_ f
 
@@ -245,7 +245,7 @@ testCases = [
 data TestCase =
     forall a. (Show a, Eq a) => MkTestCase String (ParseResult -> Maybe (a, a))
   |
-    MkRoundTrip Int (Matter Vector (Bytes X) (Number X) (Symbol X) (Text NonEmpty X) P)
+    MkRoundTrip Int (Matter Vector (Bytes X) Decimal (Symbol X) (Text NonEmpty X) P)
 
 failing :: String -> TestCase
 failing s = MkTestCase s (\_ -> Nothing :: Maybe ((), ()))
@@ -284,7 +284,7 @@ doesItPass = \case
 
 -----
 
-type M = Matter P.Sequ P.Bytes P.Number P.Symbol P.Text Pos
+type M = Matter P.Sequ P.Bytes P.Decimal P.Symbol P.Text Pos
 
 data ParseResult =
     ParseDone M
@@ -322,7 +322,7 @@ prop_prettyThenParseIsSame =
     shrnk (g, m) = [ (g, m') | m' <- G.shrinkMatter m]
     noshow _ = []
 
-prop_prettyThenParseIsSame' :: (Int, Matter Vector (Bytes X) (Number X) (Symbol X) (Text NonEmpty X) P) -> QC.Property
+prop_prettyThenParseIsSame' :: (Int, Matter Vector (Bytes X) Decimal (Symbol X) (Text NonEmpty X) P) -> QC.Property
 prop_prettyThenParseIsSame' (g, m) =
     QC.counterexample ("m = " <> show m)
   $ QC.counterexample ("g = " <> show g)
@@ -349,7 +349,7 @@ prop_prettyThenParseIsSame' (g, m) =
                  ,
                    bFun = JustFun $ \(P.MkBytes _w b) -> b
                  ,
-                   nFun = JustFun $ \(P.MkNumber n) -> n
+                   nFun = NothingFun
                  ,
                    sFun = JustFun $ \(P.MkSymbol s) -> s
                  ,

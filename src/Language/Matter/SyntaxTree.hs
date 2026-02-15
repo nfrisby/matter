@@ -27,14 +27,14 @@ data P = MkP
 
 -- | Isomorph of @()@, easier on the eyes
 --
--- For the @blit@, @nlit@, @slit@, or @tlit@ variables.
+-- For the @blit@, @slit@, or @tlit@ variables.
 data X = MkX
 
 -- | A Matter term
 --
 -- @b@ @n@ @s@ and @t@ are bytes, number, symbol, and text,
--- respectively. See 'Bytes', 'Number', 'Symbol', and 'Text' for
--- suitables arguments that contain exactly the information resulting
+-- respectively. See 'Bytes', 'Decimal', 'Symbol', and 'Text' for
+-- suitable arguments that contain exactly the information resulting
 -- from tokenization.
 --
 -- TODO should meta terms be able to have a different representation
@@ -90,7 +90,7 @@ data Flat b n s t pos =
 
 -----
 
-data Number nlit pos = NumberLit !nlit !MaybeSign !pos !pos !(MaybeFraction pos) !(MaybeExponent pos)
+data Decimal pos = DecimalLit !MaybeSign !pos !pos !(MaybeFraction pos) !(MaybeExponent pos)
 
 data MaybeFraction pos = NothingFraction | JustFraction !pos !pos
 
@@ -159,7 +159,7 @@ deriving instance (Show pos, Show a) => Show (ClosePin pos a)
 deriving instance (Show pos, Show (b pos), Show (n pos), Show (s pos), Show (t pos)) => Show (Flat b n s t pos)
 deriving instance (Show pos, Show blit) => Show (Bytes blit pos)
 deriving instance (Show pos, Show blit) => Show (MoreBytes blit pos)
-deriving instance (Show pos, Show nlit) => Show (Number nlit pos)
+deriving instance Show pos => Show (Decimal pos)
 deriving instance Show pos => Show (MaybeFraction pos)
 deriving instance Show pos => Show (MaybeExponent pos)
 deriving instance (Show pos, Show (nesequ (Escape pos)), Show tlit) => Show (Text nesequ tlit pos)
@@ -177,7 +177,7 @@ deriving instance (Eq pos, Eq a) => Eq (ClosePin pos a)
 deriving instance (Eq pos, Eq (b pos), Eq (n pos), Eq (s pos), Eq (t pos)) => Eq (Flat b n s t pos)
 deriving instance (Eq pos, Eq blit) => Eq (Bytes blit pos)
 deriving instance (Eq pos, Eq blit) => Eq (MoreBytes blit pos)
-deriving instance (Eq pos, Eq nlit) => Eq (Number nlit pos)
+deriving instance Eq pos => Eq (Decimal pos)
 deriving instance Eq pos => Eq (MaybeFraction pos)
 deriving instance Eq pos => Eq (MaybeExponent pos)
 instance          (Eq pos, Eq (nesequ (Escape pos)), Eq tlit) => Eq (Text nesequ tlit pos) where
@@ -198,7 +198,7 @@ deriving instance Functor (ClosePin pos)
 deriving instance (Functor b, Functor n, Functor s, Functor t) => Functor (Flat b n s t)
 deriving instance Functor (Bytes blit)
 deriving instance Functor (MoreBytes blit)
-deriving instance Functor (Number n)
+deriving instance Functor Decimal
 deriving instance Functor MaybeFraction
 deriving instance Functor MaybeExponent
 instance          Functor nesequ => Functor (Text nesequ t) where

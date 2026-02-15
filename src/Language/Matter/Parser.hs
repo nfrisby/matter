@@ -32,7 +32,7 @@ module Language.Matter.Parser (
     snocs,
 
     Bytes (..),
-    Number (..),
+    Decimal,
     Symbol (..),
     Text (..),
     Sequ (..),
@@ -66,8 +66,7 @@ bytesAnnoSize (MkBytes byteSize _) = byteSize
 bytesForget :: Bytes pos -> ST.Bytes X pos
 bytesForget (MkBytes _byteSize b) = b
 
-data Number pos = MkNumber !(ST.Number X pos)
-  deriving (Eq, Functor, Show)
+type Decimal = ST.Decimal
 
 data Symbol pos = MkSymbol !(ST.Symbol X pos)
   deriving (Eq, Functor, Show)
@@ -201,7 +200,7 @@ class (
         MatterParse a where
     data MatterSequ a :: Type -> Type
 
-    parseAlgebra :: ST.MatterF (MatterSequ a) Bytes Number Symbol Text Pos a -> a
+    parseAlgebra :: ST.MatterF (MatterSequ a) Bytes Decimal Symbol Text Pos a -> a
 
     emptyMatterSequ :: MatterSequ a (ST.SequencePart Pos a)
     snocMatterSequ ::
@@ -214,8 +213,8 @@ class (
 emptyStk :: Stk a
 emptyStk = Empty Nothing
 
-instance MatterParse (ST.Matter Sequ Bytes Number Symbol Text Pos) where
-    data MatterSequ (ST.Matter Sequ Bytes Number Symbol Text Pos) a =
+instance MatterParse (ST.Matter Sequ Bytes Decimal Symbol Text Pos) where
+    data MatterSequ (ST.Matter Sequ Bytes Decimal Symbol Text Pos) a =
         MkMatterSequ !Word32 !Word32 [a]
       deriving (Show, Eq)
 
@@ -237,9 +236,9 @@ snoc l r = curry $ \case
     (Flat (IntegerPart mbSign l1 r1) stk, OdToken OdFractionPart) ->
         Just $ Flat (FractionPart l r $ IntegerPart mbSign l1 r1) stk
     (Flat (FractionPart l2 r2 (IntegerPart mbSign1 l1 r1)) stk, OdToken (OdExponentPart mbSign)) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number $ MkNumber $ ST.NumberLit MkX mbSign1 l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent mbSign l r)
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number $ ST.DecimalLit mbSign1 l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent mbSign l r)
     (Flat (IntegerPart mbSign1 l1 r1) stk, OdToken (OdExponentPart mbSign)) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number $ MkNumber $ ST.NumberLit MkX mbSign1 l1 r1 ST.NothingFraction (ST.JustExponent mbSign l r)
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number $ ST.DecimalLit mbSign1 l1 r1 ST.NothingFraction (ST.JustExponent mbSign l r)
 
     (_stk, OdToken OdFractionPart) -> Nothing
     (_stk, OdToken OdExponentPart{}) -> Nothing
@@ -456,8 +455,8 @@ pop = \case
     
 popFlat :: MatterParse a => Flat x -> Maybe a
 popFlat = \case
-    IntegerPart mbSign l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number $ MkNumber $ ST.NumberLit MkX mbSign l r ST.NothingFraction ST.NothingExponent
-    FractionPart l2 r2 (IntegerPart mbSign l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number $ MkNumber $ ST.NumberLit MkX mbSign l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
+    IntegerPart mbSign l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number $ ST.DecimalLit mbSign l r ST.NothingFraction ST.NothingExponent
+    FractionPart l2 r2 (IntegerPart mbSign l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number $ ST.DecimalLit mbSign l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
     Suppressor{} -> Nothing
     x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text $ finalizeTA $ popT mempty ST.NoMoreText x
     OpenTextJoiner{} -> Nothing
@@ -534,7 +533,7 @@ popJoJt !janno j = \case
     OpenTextJoiner p fstk -> PoppedTextJoiner janno p j fstk
     JoinerText l r fstk -> popJoJe (textAnno janno Nothing l r) (ST.ConsJoinerText MkX l r j) fstk
 
-popBytes :: Word32 -> ST.MoreBytes X Pos -> Flat B -> ST.Flat Bytes Number Symbol Text Pos
+popBytes :: Word32 -> ST.MoreBytes X Pos -> Flat B -> ST.Flat Bytes Decimal Symbol Text Pos
 popBytes !anno acc = \case
     Bytes l r -> ST.Bytes $ MkBytes (anno + b l r) $ ST.BytesLit MkX l r acc
     MoreBytes l r (CloseBytesJoiner _r (OpenBytesJoiner p fstk)) ->
