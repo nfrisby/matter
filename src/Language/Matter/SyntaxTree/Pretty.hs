@@ -36,14 +36,19 @@ consDList x y = x DNE.:| y
 
 -----
 
-pretty :: (Functor seq, Foldable seq, Foldable neseq) => Matter seq (Bytes blit) (Number nlit) (Symbol slit) (Text neseq tlit) pos -> DNonEmpty Token
+pretty ::
+    (Functor sequ, Foldable sequ, Foldable nesequ)
+ =>
+    Matter sequ (Bytes blit) (Number nlit) (Symbol slit) (Text nesequ tlit) pos
+ ->
+    DNonEmpty Token
 pretty =
     fold phi
   where
     phi = \case
         FlatF flt -> prettyFlat flt
         VariantF _s _l _r x -> od OdVariant <> x
-        SequenceF _l xs _r -> sd SdOpenSeq <> foldr (\x acc -> prettySequencePart x <> acc) (sd SdCloseSeq) xs
+        SequenceF _l xs _r -> sd SdOpenSequ <> foldr (\x acc -> prettySequencePart x <> acc) (sd SdCloseSequ) xs
         MetaGtF _l x _r y ->
             let y' = case y of
                     NoClosePin y1 -> y1
@@ -60,7 +65,7 @@ prettySequencePart = \case
     Item x -> x
     MetaEQ _l x _r -> sd (SdOpenMeta EQ) <> x <> sd (SdCloseMeta EQ)
 
-prettyFlat :: Foldable neseq => Flat (Bytes blit) (Number nlit) slit (Text neseq tlit) pos -> DNonEmpty Token
+prettyFlat :: Foldable nesequ => Flat (Bytes blit) (Number nlit) slit (Text nesequ tlit) pos -> DNonEmpty Token
 prettyFlat = \case
     Atom _s _l _r -> od OdAtom
     Bytes (BytesLit _blit _l _r more) -> OdToken OdBytes `consDList` prettyMoreBytes more
@@ -80,12 +85,12 @@ prettyMoreBytes = \case
     NoMoreBytes -> mempty
     MoreBytes _p (BytesLit _blit _l _r more) -> od' OdOpenJoiner <> sd' SdCloseJoiner <> od' OdBytes <> prettyMoreBytes more
 
-prettyText :: Foldable neseq => Text neseq t pos -> DNonEmpty Token
+prettyText :: Foldable nesequ => Text nesequ t pos -> DNonEmpty Token
 prettyText = \case
     Suppressor _p _p' j txt -> sd SdUnderscore <> od OdOpenJoiner <> prettyJoiner j <> prettyText txt
     TextLit q _tlit _l _r more -> prettyQuote q `appendDList` prettyMoreText more
 
-prettyJoiner :: Foldable neseq => Joiner neseq t pos j -> DNonEmpty Token
+prettyJoiner :: Foldable nesequ => Joiner nesequ t pos j -> DNonEmpty Token
 prettyJoiner = \case
     NilJoiner _p -> sd SdCloseJoiner
     ConsJoinerText _tlit _l _r j -> od OdJoinerText <> prettyJoiner j
@@ -99,7 +104,7 @@ prettyQuote = \case
     DoubleQuote -> sd SdDoubleQuotedString
     MultiQuote sz -> sd $ SdMultiQuotedString sz
 
-prettyMoreText :: Foldable neseq => MoreText neseq t pos -> DList Token
+prettyMoreText :: Foldable nesequ => MoreText nesequ t pos -> DList Token
 prettyMoreText = \case
     NoMoreText -> mempty
     MoreText _p j txt -> toDList $ od OdOpenJoiner <> prettyJoiner j <> prettyText txt

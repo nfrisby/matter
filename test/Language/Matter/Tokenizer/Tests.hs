@@ -58,7 +58,7 @@ testCases = [
         [8#OdVariant,9#OdWhitespace,17#OdVariant,18#OdWhitespace,21#OdIntegerPart (JustSign PosSign),23#OdFractionPart]
         Done
   , MkTestCase "[1+2+3-4]"
-        [0#SdOpenSeq]
+        [0#SdOpenSequ]
         (Snoc 2 SnocNoSign)
   , MkTestCase "0.0"
         [1#OdIntegerPart NothingSign,3#OdFractionPart]
@@ -91,7 +91,7 @@ testCases = [
         [1#OdIntegerPart NothingSign]
         (Snoc 2 $ SnocNeedDigit FractionPart)
   , MkTestCase "]"
-        [0#SdCloseSeq]
+        [0#SdCloseSequ]
         Done
   , MkTestCase "(^ @hi ){< '0'ok'0' <}"
         [ 1#SdOpenPin, 3#OdWhitespace, 6#OdAtom, 7#OdWhitespace, 7#SdCloseParen
@@ -127,15 +127,15 @@ testCases = [
         Done
   , MkTestCase "#array [@uint8 32]"
         -- even more sensible
-        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSeq, 14#OdAtom, 15#OdWhitespace, 17#OdIntegerPart NothingSign, 17#SdCloseSeq]
+        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSequ, 14#OdAtom, 15#OdWhitespace, 17#OdIntegerPart NothingSign, 17#SdCloseSequ]
         Done
   , MkTestCase "#array [32 @uint8 ]"
         -- equally sensible
-        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSeq, 10#OdIntegerPart NothingSign, 11#OdWhitespace, 17#OdAtom, 18#OdWhitespace, 18#SdCloseSeq]
+        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSequ, 10#OdIntegerPart NothingSign, 11#OdWhitespace, 17#OdAtom, 18#OdWhitespace, 18#SdCloseSequ]
         Done
   , MkTestCase "#array [32 @uint8]"
         -- gotcha!
-        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSeq, 10#OdIntegerPart NothingSign, 11#OdWhitespace, 18#OdAtom]
+        [6#OdVariant, 7#OdWhitespace, 7#SdOpenSequ, 10#OdIntegerPart NothingSign, 11#OdWhitespace, 18#OdAtom]
         Done
   , MkTestCase "@][}{<>()\"!013_--sdf"
         [20#OdAtom]
@@ -238,7 +238,7 @@ testCases = [
         [1#OdOpenJoiner, 9#OdJoinerText]
         Done
   , MkTestCase "[@NaN 0]"
-        [0#SdOpenSeq, 5#OdAtom, 6#OdWhitespace, 7#OdIntegerPart NothingSign, 7#SdCloseSeq]
+        [0#SdOpenSequ, 5#OdAtom, 6#OdWhitespace, 7#OdIntegerPart NothingSign, 7#SdCloseSequ]
         Done
   , MkTestCase "#Z '7''salsa''7'"
         [2#OdVariant, 3#OdWhitespace, 15#SdMultiQuotedString (Four1' D10_7)]

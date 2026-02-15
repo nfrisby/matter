@@ -35,7 +35,7 @@ module Language.Matter.Parser (
     Number (..),
     Symbol (..),
     Text (..),
-    Seq (..),
+    Sequ (..),
     bytesAnnoSize,
     bytesForget,
     textAnnoCounts,
@@ -81,9 +81,9 @@ textAnnoCounts (MkText pos _) = pos
 textForget :: Text pos -> ST.Text NonEmpty X pos
 textForget (MkText _pos t) = t
 
-data Seq a =
+data Sequ a =
     -- | Num 'ST.Item's and num 'ST.MetaEQ's
-    MkSeq !Word32 !Word32 !(Vector a)
+    MkSequ !Word32 !Word32 !(Vector a)
   deriving (Eq, Show, Foldable, Functor)
 
 -----
@@ -163,10 +163,10 @@ data Stk a =
     OpenVariant !Pos !Pos (Stk a)   -- ^ won't pop
   |
     -- | [ a b c
-    OpenSequence !Pos (MatterSeq a (ST.SequencePart Pos a)) (Stk a)   -- ^ won't pop
+    OpenSequence !Pos (MatterSequ a (ST.SequencePart Pos a)) (Stk a)   -- ^ won't pop
   |
     -- | [ a b c {=
-    Sequence_OpenMetaEQ !Pos (MatterSeq a (ST.SequencePart Pos a)) !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
+    Sequence_OpenMetaEQ !Pos (MatterSequ a (ST.SequencePart Pos a)) !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
   |
     -- | {> and {> a
     OpenMetaGT !Pos (Maybe a) (Stk a)   -- ^ @Just@ pops
@@ -194,41 +194,41 @@ data Stk a =
 
 -- | A data type the parser knows how to construct
 class (
-        forall x. Show x => Show (MatterSeq a x)
+        forall x. Show x => Show (MatterSequ a x)
       ,
-        forall x. Eq x => Eq (MatterSeq a x)
+        forall x. Eq x => Eq (MatterSequ a x)
       ) =>
         MatterParse a where
-    data MatterSeq a :: Type -> Type
+    data MatterSequ a :: Type -> Type
 
-    parseAlgebra :: ST.MatterF (MatterSeq a) Bytes Number Symbol Text Pos a -> a
+    parseAlgebra :: ST.MatterF (MatterSequ a) Bytes Number Symbol Text Pos a -> a
 
-    emptyMatterSeq :: MatterSeq a (ST.SequencePart Pos a)
-    snocMatterSeq ::
-        MatterSeq a (ST.SequencePart Pos a)
+    emptyMatterSequ :: MatterSequ a (ST.SequencePart Pos a)
+    snocMatterSequ ::
+        MatterSequ a (ST.SequencePart Pos a)
      ->
         ST.SequencePart Pos a
      ->
-        MatterSeq a (ST.SequencePart Pos a)
+        MatterSequ a (ST.SequencePart Pos a)
 
 emptyStk :: Stk a
 emptyStk = Empty Nothing
 
-instance MatterParse (ST.Matter Seq Bytes Number Symbol Text Pos) where
-    data MatterSeq (ST.Matter Seq Bytes Number Symbol Text Pos) a =
-        MkMatterSeq !Word32 !Word32 [a]
+instance MatterParse (ST.Matter Sequ Bytes Number Symbol Text Pos) where
+    data MatterSequ (ST.Matter Sequ Bytes Number Symbol Text Pos) a =
+        MkMatterSequ !Word32 !Word32 [a]
       deriving (Show, Eq)
 
     parseAlgebra =
-        ST.embed . ST.mapFuns ST.nothingFuns{ST.seqFun = ST.JustFun f}
+        ST.embed . ST.mapFuns ST.nothingFuns{ST.sequFun = ST.JustFun f}
       where
-        f (MkMatterSeq nitem nmeta xs) =
-            MkSeq nitem nmeta $ V.fromListN (fromIntegral (nitem + nmeta)) $ reverse xs
+        f (MkMatterSequ nitem nmeta xs) =
+            MkSequ nitem nmeta $ V.fromListN (fromIntegral (nitem + nmeta)) $ reverse xs
 
-    emptyMatterSeq = MkMatterSeq 0 0[]
-    snocMatterSeq (MkMatterSeq nitem nmeta xs) = \case
-        x@ST.Item{}   -> MkMatterSeq (nitem + 1) nmeta (x : xs)
-        x@ST.MetaEQ{} -> MkMatterSeq nitem (nmeta + 1) (x : xs)
+    emptyMatterSequ = MkMatterSequ 0 0[]
+    snocMatterSequ (MkMatterSequ nitem nmeta xs) = \case
+        x@ST.Item{}   -> MkMatterSequ (nitem + 1) nmeta (x : xs)
+        x@ST.MetaEQ{} -> MkMatterSequ nitem (nmeta + 1) (x : xs)
 
 snoc :: MatterParse a => Pos -> Pos -> Stk a -> Token -> Maybe (Stk a)
 snoc l r = curry $ \case
@@ -359,9 +359,9 @@ snoc l r = curry $ \case
     (stk, OdToken OdVariant) ->
         Just $ OpenVariant l r $ simplify stk
     -- [ ]
-    (stk, SdToken SdOpenSeq) ->
-        Just $ OpenSequence l emptyMatterSeq $ simplify stk
-    (stk, SdToken SdCloseSeq) ->
+    (stk, SdToken SdOpenSequ) ->
+        Just $ OpenSequence l emptyMatterSequ $ simplify stk
+    (stk, SdToken SdCloseSequ) ->
         case simplify stk of
             OpenSequence p1 acc stk' ->
                 push stk' $ parseAlgebra $ ST.SequenceF p1 acc l
@@ -375,7 +375,7 @@ snoc l r = curry $ \case
     (stk, SdToken (SdCloseMeta EQ)) -> do
         case simplify stk of
             Sequence_OpenMetaEQ p1 acc p2 (Just m) stk' ->
-                Just $ OpenSequence p1 (snocMatterSeq acc $ ST.MetaEQ p2 m l) stk'
+                Just $ OpenSequence p1 (snocMatterSequ acc $ ST.MetaEQ p2 m l) stk'
             _ -> Nothing
     -- {> >}
     (stk, SdToken (SdOpenMeta GT)) ->
@@ -555,7 +555,7 @@ push = flip $ \m -> \case
     OpenVariant l r stk ->
         push stk $ parseAlgebra $ ST.VariantF (MkSymbol (ST.MkSymbol MkX)) l r m
     OpenSequence p acc stk ->
-        Just $ OpenSequence p (snocMatterSeq acc $ ST.Item m) stk
+        Just $ OpenSequence p (snocMatterSequ acc $ ST.Item m) stk
     Sequence_OpenMetaEQ p1 acc p2 mb stk ->
         case mb of
             Nothing -> Just $ Sequence_OpenMetaEQ p1 acc p2 (Just m) stk
@@ -617,7 +617,7 @@ eof = (. simplify) $ \case
 -- Copied from -ddump-deriv in a throwaway module where I simply
 -- removed the type index from Flat.
 
-instance (Show (MatterSeq a (ST.SequencePart Pos a)), Show a) => Show (Stk a) where
+instance (Show (MatterSequ a (ST.SequencePart Pos a)), Show a) => Show (Stk a) where
     showsPrec a_aIc (Empty b1_aId)
       = showParen
           (a_aIc >= 11)

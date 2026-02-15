@@ -213,7 +213,7 @@ generatePinMetaLT =
 -----
 
 -- | TODO very incomplete
-shrinkMatter :: Matter Vector (Bytes X) (Number X) (Symbol X) (Text neseq X) P -> [Matter Vector (Bytes X) (Number X) (Symbol X) (Text neseq X) P]
+shrinkMatter :: Matter Vector (Bytes X) (Number X) (Symbol X) (Text nesequ X) P -> [Matter Vector (Bytes X) (Number X) (Symbol X) (Text nesequ X) P]
 shrinkMatter = \case
     Flat flt -> map Flat $ flat flt
     Variant s l r x -> x  : [Variant s l r x' | x' <- shrinkMatter x]

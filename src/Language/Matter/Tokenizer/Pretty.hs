@@ -102,8 +102,8 @@ prettyToken g = let ?g = g in wrap $ \case
         OdFractionPart -> "." <> pick "0" ["123", "100", "000", "00900"]
         OdExponentPart mbSign -> pick "e" ["E"] <> integerPart mbSign
     SdToken sd -> case sd of
-        SdOpenSeq -> "["
-        SdCloseSeq -> "]"
+        SdOpenSequ -> "["
+        SdCloseSequ -> "]"
         SdCloseParen -> ")"
         SdUnderscore -> "_"
         SdOpenPin -> "(^"

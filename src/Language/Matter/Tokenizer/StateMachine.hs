@@ -554,9 +554,9 @@ data SnocResult =
 --
 -- In other words, they do not require a lookahead to delimit.
 data SdToken =
-    SdOpenSeq
+    SdOpenSequ
   |
-    SdCloseSeq
+    SdCloseSequ
   |
     SdCloseParen
   |
@@ -831,8 +831,8 @@ snocStart flag snocNothing snocJust = \case
     c | isWS c -> snocNothing MoreWhitespace
     '@' -> snocNothing ManyIdAtom
     '#' -> snocNothing ManyIdVariant
-    '[' -> snocJust SdOpenSeq Start
-    ']' -> snocJust SdCloseSeq Start
+    '[' -> snocJust SdOpenSequ Start
+    ']' -> snocJust SdCloseSequ Start
     '(' -> snocNothing LeftParenSuccessor
     ')' -> snocJust SdCloseParen Start
     '^' -> snocNothing CaretSuccessor

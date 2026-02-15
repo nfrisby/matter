@@ -198,7 +198,7 @@ pathLength = Map.size . pathMap
 -- paths to the 'BothPins' arguments involve two additional turns, so
 -- 'SnocPath' has been called twice for each.
 pathedFmap ::
-    (MatterStream inp, Traversable seq)
+    (MatterStream inp, Traversable sequ)
  =>
     inp
  ->
@@ -206,9 +206,9 @@ pathedFmap ::
  ->
     (Path -> a -> a')
  ->
-    MatterF seq b n s t Pos a
+    MatterF sequ b n s t Pos a
  ->
-    MatterF seq b n s t Pos a'
+    MatterF sequ b n s t Pos a'
 {-# INLINE pathedFmap #-}
 pathedFmap inp path f = \case
     FlatF flt -> FlatF flt
@@ -239,15 +239,15 @@ data W32W32 = MkW32W32 !Word32 !Word32
 
 -- | Like 'fold' but also applies the appropriate 'Turn's to the 'Path'
 pathedFold ::
-    (MatterStream inp, Traversable seq)
+    (MatterStream inp, Traversable sequ)
  =>
-    (Path -> MatterF seq b n s t Pos a -> a)
+    (Path -> MatterF sequ b n s t Pos a -> a)
  ->
     inp
  ->
     Path
  ->
-    Matter seq b n s t Pos
+    Matter sequ b n s t Pos
  ->
     a
 {-# INLINE pathedFold #-}

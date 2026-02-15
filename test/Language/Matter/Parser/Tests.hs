@@ -284,7 +284,7 @@ doesItPass = \case
 
 -----
 
-type M = Matter P.Seq P.Bytes P.Number P.Symbol P.Text Pos
+type M = Matter P.Sequ P.Bytes P.Number P.Symbol P.Text Pos
 
 data ParseResult =
     ParseDone M
@@ -345,7 +345,7 @@ prop_prettyThenParseIsSame' (g, m) =
     forget =
         fold $ embed
              . mapFuns MkFuns {
-                   seqFun = JustFun $ \(P.MkSeq _nitem _nmeta xs) -> xs
+                   sequFun = JustFun $ \(P.MkSequ _nitem _nmeta xs) -> xs
                  ,
                    bFun = JustFun $ \(P.MkBytes _w b) -> b
                  ,
