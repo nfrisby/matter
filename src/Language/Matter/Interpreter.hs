@@ -222,17 +222,17 @@ pathMap = \case
 --
 -- Equal to the number of 'SnocPath' constructors.
 --
--- It is potentially /greater/ than the number of constructors of the
--- 'Matter' data type, since an occurrence of 'BothPins' also adds its
--- own 'SnocPath' constructor.
+-- It is potentially /greater/ than the number of data constructors of
+-- type 'Matter', since an occurrence of 'BothPins' also adds its own
+-- 'SnocPath' constructor.
 pathLength :: Path -> Int
 pathLength = Map.size . pathMap
 
 -- | Like 'fmap' but also applies the appropriate 'Turn's to the 'Path'
 --
 -- 'SnocPath' will hav been applied to each position. Note that the
--- paths to the 'BothPins' arguments involve two additional turns, so
--- 'SnocPath' has been called twice for each.
+-- paths to the 'BothPins' arguments involve two turns, so 'SnocPath'
+-- has been called twice for each.
 pathedFmap ::
     Traversable sequ
  =>
