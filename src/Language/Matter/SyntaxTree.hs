@@ -26,37 +26,62 @@ data P = MkP
 -- For the @blit@, @nlit@, @slit@, or @tlit@ variables.
 data X = MkX
 
+-- | A Matter term
+--
+-- @b@ @n@ @s@ and @t@ are bytes, number, symbol, and text,
+-- respectively. See 'Bytes', 'Number', 'Symbol', and 'Text' for
+-- suitables arguments that contain exactly the information resulting
+-- from tokenization.
+--
+-- TODO should meta terms be able to have a different representation
+-- than non-meta terms? What about meta meta terms, and so on?
 data Matter seq b n s t pos =
+    -- | flat terms
     Flat !(Flat b n s t pos)
   |
+    -- | #foo a
     Variant !(s pos) !pos !pos (Matter seq b n s t pos)
   |
+    -- | [ ... a b c ... ]
     Sequence !pos (seq (SequencePart pos (Matter seq b n s t pos))) !pos
   |
+    -- | {> a >} and its referent
     MetaGT !pos (Matter seq b n s t pos) !pos !(ClosePin pos (Matter seq b n s t pos))
   |
+    -- | ( a )
     Paren !pos (Matter seq b n s t pos) !pos
   |
+    -- | (^ a ) {< b <}
     PinMetaLT !pos (Matter seq b n s t pos) !pos !pos (Matter seq b n s t pos) !pos
 
+-- | \@ or #
 data Symbol slit pos = MkSymbol !slit
 
+-- | The referent of {> a >} ...
 data ClosePin pos a =
+    -- | a
     NoClosePin a
   |
+    -- | ( a ^)
     OnlyClosePin !pos a !pos
   |
+    -- | (^ a ^) {< b <}
     BothPins !pos a !pos !pos a !pos
 
 -----
 
+-- | A Matter term that has no Matter subterms
 data Flat b n s t pos =
+    -- | \@
     Atom !(s pos) !pos !pos
   |
+    -- | 0x and joiners
     Bytes !(b pos)
   |
+    -- | 123
     Number !(n pos)
   |
+    -- | "foo", '0'"Why?" she asked.'0', and joiners
     Text !(t pos)
 
 -----
@@ -98,17 +123,26 @@ data JOINER =
 --
 -- The index of a 'Joiner' indicates what /preceded/ it.
 data Joiner :: (Type -> Type) -> Type -> Type -> JOINER -> Type where
+    -- | end of joiner follows anything
+    --
+    -- TODO would it be useful to have @SingI j@ constraint?
     NilJoiner         :: !pos                                              -> Joiner neseq tlit pos j
+    -- | text only follows 'Je' and can only be followed by 'Jt'
     ConsJoinerText    :: !tlit -> !pos -> !pos -> Joiner neseq tlit pos Jt -> Joiner neseq tlit pos Je
+    -- | some escapes only follow 'Jt' and can only be jollowed by 'Je'
     ConsJoinerEscapes :: !(neseq (Escape pos)) -> Joiner neseq tlit pos Je -> Joiner neseq tlit pos Jt
 
-data Escape pos = MkEscape !pos !Four
+data Escape pos =
+    -- | How man bytes is this code point in its UTF8 encoding?
+    MkEscape !pos !Four
 
 -----
 
 data SequencePart pos a =
+    -- | not {= a =}
     Item a
   |
+    -- | {= a =}
     MetaEQ !pos a !pos
 
 -----
@@ -176,7 +210,7 @@ deriving instance Functor (SequencePart pos)
 
 instance          TestEquality (Joiner neseq tlit pos) where
     testEquality = curry $ \case
-        (NilJoiner{}        , NilJoiner{}        ) -> Nothing
+        (NilJoiner{}        , NilJoiner{}        ) -> Nothing   -- SingI j could do better here
         (ConsJoinerText{}   , ConsJoinerText{}   ) -> Just Refl
         (ConsJoinerEscapes{}, ConsJoinerEscapes{}) -> Just Refl
         _ -> Nothing
@@ -210,10 +244,12 @@ data MatterF seq b n s t pos a =
     ParenF !pos a !pos
   |
     PinMetaLtF !pos a !pos !pos a !pos
+  deriving (Functor)
 
-deriving instance Functor seq => Functor (MatterF seq b n s t pos)
+deriving instance (Eq (seq (SequencePart pos a)), Eq (b pos), Eq (n pos), Eq (s pos), Eq (t pos), Eq pos, Eq a) => Eq (MatterF seq b n s t pos a)
+deriving instance (Show (seq (SequencePart pos a)), Show (b pos), Show (n pos), Show (s pos), Show (t pos), Show pos, Show a) => Show (MatterF seq b n s t pos a)
 
--- | Project one layer of 'MatterF'
+-- | Peel one layer of 'MatterF'
 project :: Matter seq b n s t pos -> MatterF seq b n s t pos (Matter seq b n s t pos)
 {-# INLINE project #-}
 project = \case

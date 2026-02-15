@@ -772,7 +772,7 @@ snoc start cur = \case
     JoinerEscapedUtf8 acc -> (. parseD16) $ \case
         Nothing -> SnocError SnocNeedNibble
         Just x -> case acc of
-            Nothing' -> case leadingBitCountPlus1 x of
+            Nothing' -> case leadingOneBitCountPlus1 x of
                 Five1 -> SnocEpsilon $ JoinerEscapedUtf8 $ Just' Utf8Size1
                 Five2 -> SnocError SnocBadUtf8Nibble1
                 Five3 -> SnocEpsilon $ JoinerEscapedUtf8 $ Just' Utf8Size2
@@ -785,12 +785,12 @@ snoc start cur = \case
              -> SnocSd (SdJoinerEscapedUtf8 (valueUtf8Size size)) JoinerNotEscaped
 
               | odd (posDiff cur start)   -- Note that cur - start > 1 because acc is Just'
-              , Five2 /= leadingBitCountPlus1 x
+              , Five2 /= leadingOneBitCountPlus1 x
              -> SnocError SnocBadUtf8NibbleN
 
               | Utf8Size4 _ <- size
               , 2 == posDiff cur start   -- second nibble
-              , Five1 /= leadingBitCountPlus1 x
+              , Five1 /= leadingOneBitCountPlus1 x
              -> SnocError SnocBadUtf8Nibble2
 
               | Utf8Size4 True <- size

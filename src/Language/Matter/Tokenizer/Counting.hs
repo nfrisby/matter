@@ -29,7 +29,7 @@ module Language.Matter.Tokenizer.Counting (
     valueD16,
 
     -- * UTF8 nibble
-    leadingBitCountPlus1,
+    leadingOneBitCountPlus1,
 
   ) where
 
@@ -145,6 +145,7 @@ valueD10 = \case
     D10_9 -> 9
 
 parseD10 :: Char -> Maybe D10
+{-# INLINE parseD10 #-}
 parseD10 = \case
     '0' -> Just D10_0
     '1' -> Just D10_1
@@ -184,6 +185,7 @@ valueD16 = \case
     D16_F -> 15
 
 parseD16 :: Char -> Maybe D16
+{-# INLINE parseD16 #-}
 parseD16 = \case
     c | Just x <- parseD10 c -> Just $ case x of
         D10_0 -> D16_0
@@ -215,8 +217,8 @@ parseD16 = \case
 -- | Does this nibble have 0, 1, 2, 3, or 4 leading 1s in binary notation?
 --
 -- Cf <https://en.wikipedia.org/wiki/UTF-8#Description>
-leadingBitCountPlus1 :: D16 -> Five
-leadingBitCountPlus1 = \case
+leadingOneBitCountPlus1 :: D16 -> Five
+leadingOneBitCountPlus1 = \case
     -- 0xxx
     D16_0 -> Five1
     D16_1 -> Five1
@@ -247,7 +249,14 @@ leadingBitCountPlus1 = \case
 
 data Sign = NegSign | PosSign
 
-data MaybeSign = NothingSign | JustSign !Sign
+data MaybeSign =
+    -- | no sign
+    --
+    -- Almost always indistinguishable from +.
+    NothingSign
+  |
+    -- | + or -
+    JustSign !Sign
 
 deriving instance Show Sign
 deriving instance Show MaybeSign
