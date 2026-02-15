@@ -13,6 +13,7 @@ module Language.Matter.Interpreter (
     textSymbolValue,
 
     -- * Bytes
+    BadBytes (..),
     interpretBytes,
     interpretBytesLit,
 
@@ -26,6 +27,7 @@ module Language.Matter.Interpreter (
     pathedFold,
   ) where
 
+import Control.Monad.Trans.Except (Except, throwE)
 import Control.Monad.ST (runST)
 import Control.Monad.Trans.State qualified as State
 import Data.Bits ((.|.), (.>>.))
@@ -77,15 +79,19 @@ interpretSymbol inp (MkSymbol l r) =
 
 ----
 
-interpretBytes :: MatterStream inp => inp -> Maybe Word32 -> Bytes blit Pos -> Either String BA.ByteArray
+data BadBytes =
+      MkBadBytes !Pos !Pos
+  deriving (Eq, Show)
+
+interpretBytes :: MatterStream inp => inp -> Maybe Word32 -> Bytes blit Pos -> Except BadBytes BA.ByteArray
 interpretBytes inp mbByteSize top =
     runST $ do
         marr <- BA.newByteArray (fromIntegral n)
         let go !i = \case
                 BytesLit _blit l r more -> do
-                    let txt@(TI.Text arr off len) = slice l r inp
+                    let TI.Text arr off len = slice l r inp
                     mx <- go2 i arr (off + 2) 0 0 (len - 2)   -- skip 0x
-                    if mx == maxBound then pure (Just (l, r, txt)) else do
+                    if mx == maxBound then pure $ Just $ MkBadBytes l r else do
                         case more of
                             NoMoreBytes -> pure Nothing
                             MoreBytes _p bytes -> go i bytes
@@ -98,8 +104,8 @@ interpretBytes inp mbByteSize top =
                 BA.writeByteArray marr (i + (j .>>. 1)) (b1 .|. b2)
                 go2 i arr base (acc `max` b1 `max` b2) (j + 2) m
         go 0 top >>= \case
-            Just (l, r, txt) -> pure $ Left $ "Bad bytes literal " ++ show (l, r, txt)
-            Nothing -> Right <$> BA.unsafeFreezeByteArray marr
+            Just exn -> pure $ throwE exn
+            Nothing -> pure <$> BA.unsafeFreezeByteArray marr
                 -- TODO why isn't there a @createByteArrayMaybe :: Int -> (forall s. MutableByteArray s -> ST s (Maybe e)) -> Either e ByteArray@?
   where
     n = case mbByteSize of
@@ -126,7 +132,7 @@ interpretBytes inp mbByteSize top =
       where
         !(GHC.I# i) = fromIntegral w
 
-interpretBytesLit :: MatterStream inp => inp -> Pos -> Pos -> Either String BA.ByteArray
+interpretBytesLit :: MatterStream inp => inp -> Pos -> Pos -> Except BadBytes BA.ByteArray
 interpretBytesLit inp l r =
     GHC.inline interpretBytes inp Nothing $ BytesLit MkX l r NoMoreBytes
 

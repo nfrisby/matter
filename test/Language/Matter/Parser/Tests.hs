@@ -217,12 +217,12 @@ testCases = [
 
   , passingAnd "0x34" $ \inp -> \case
         Flat (Bytes bytes) ->
-            Just (I.interpretBytes inp (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), Right (fromList [0x34]))
+            Just (I.interpretBytes inp (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), pure (fromList [0x34]))
         _ -> Nothing
 
   , passingAnd "0x34110f" $ \inp -> \case
         Flat (Bytes bytes) ->
-            Just (I.interpretBytes inp (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), Right (fromList [0x34, 0x11, 0x0f]))
+            Just (I.interpretBytes inp (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), pure (fromList [0x34, 0x11, 0x0f]))
         _ -> Nothing
 
   , passingAnd "@foo" $ \inp -> \case
