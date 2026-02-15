@@ -27,7 +27,7 @@ data P = MkP
 
 -- | Isomorph of @()@, easier on the eyes
 --
--- For the @blit@, @slit@, or @tlit@ variables.
+-- For the @blit@ or @tlit@ variables.
 data X = MkX
 
 -- | A Matter term
@@ -44,7 +44,7 @@ data Matter sequ b n s t pos =
     Flat !(Flat b n s t pos)
   |
     -- | #foo a
-    Variant !(s pos) !pos !pos (Matter sequ b n s t pos)
+    Variant !(s pos) (Matter sequ b n s t pos)
   |
     -- | [ ... a b c ... ]
     Sequence !pos (sequ (SequencePart pos (Matter sequ b n s t pos))) !pos
@@ -59,7 +59,7 @@ data Matter sequ b n s t pos =
     PinMetaLT !pos (Matter sequ b n s t pos) !pos !pos (Matter sequ b n s t pos) !pos
 
 -- | \@ or #
-data Symbol slit pos = MkSymbol !slit
+data Symbol pos = MkSymbol !pos !pos
 
 -- | The referent of {> a >} ...
 data ClosePin pos a =
@@ -76,8 +76,8 @@ data ClosePin pos a =
 
 -- | A Matter term that has no Matter subterms
 data Flat b n s t pos =
-    -- | \@
-    Atom !(s pos) !pos !pos
+    -- | \@foo
+    Atom !(s pos)
   |
     -- | 0x and joiners
     Bytes !(b pos)
@@ -154,7 +154,7 @@ data SequencePart pos a =
 deriving instance Show P
 deriving instance Show X
 deriving instance (Show pos, Show (b pos), Show (n pos), Show (s pos), Show (t pos), Show (sequ (SequencePart pos (Matter sequ b n s t pos)))) => Show (Matter sequ b n s t pos)
-deriving instance (Show pos, Show slit) => Show (Symbol slit pos)
+deriving instance Show pos => Show (Symbol pos)
 deriving instance (Show pos, Show a) => Show (ClosePin pos a)
 deriving instance (Show pos, Show (b pos), Show (n pos), Show (s pos), Show (t pos)) => Show (Flat b n s t pos)
 deriving instance (Show pos, Show blit) => Show (Bytes blit pos)
@@ -172,7 +172,7 @@ deriving instance (Show pos, Show a) => Show (SequencePart pos a)
 deriving instance Eq P
 deriving instance Eq X
 deriving instance (Eq pos, Eq (sequ (SequencePart pos (Matter sequ b n s t pos))), Eq (b pos), Eq (n pos), Eq (s pos), Eq (t pos)) => Eq (Matter sequ b n s t pos)
-deriving instance (Eq pos, Eq slit) => Eq (Symbol slit pos)
+deriving instance Eq pos => Eq (Symbol pos)
 deriving instance (Eq pos, Eq a) => Eq (ClosePin pos a)
 deriving instance (Eq pos, Eq (b pos), Eq (n pos), Eq (s pos), Eq (t pos)) => Eq (Flat b n s t pos)
 deriving instance (Eq pos, Eq blit) => Eq (Bytes blit pos)
@@ -193,7 +193,7 @@ deriving instance (Eq pos, Eq (nesequ (Escape pos)), Eq tlit) => Eq (Joiner nese
 deriving instance Eq pos => Eq (Escape pos)
 deriving instance (Eq pos, Eq a) => Eq (SequencePart pos a)
 
-deriving instance Functor (Symbol b)
+deriving instance Functor Symbol
 deriving instance Functor (ClosePin pos)
 deriving instance (Functor b, Functor n, Functor s, Functor t) => Functor (Flat b n s t)
 deriving instance Functor (Bytes blit)
@@ -239,7 +239,7 @@ mapPosJoiner f = \case
 data MatterF sequ b n s t pos a =
     FlatF (Flat b n s t pos)
   |
-    VariantF !(s pos) !pos !pos a
+    VariantF !(s pos) a
   |
     SequenceF !pos (sequ (SequencePart pos a)) !pos
   |
@@ -258,7 +258,7 @@ project :: Matter sequ b n s t pos -> MatterF sequ b n s t pos (Matter sequ b n 
 {-# INLINE project #-}
 project = \case
     Flat flt -> FlatF flt
-    Variant s l r x -> VariantF s l r x
+    Variant s x -> VariantF s x
     Sequence l xs r -> SequenceF l xs r
     MetaGT l x r y -> MetaGtF l x r y
     Paren l x r -> ParenF l x r
@@ -269,7 +269,7 @@ embed :: MatterF sequ b n s t pos (Matter sequ b n s t pos) -> Matter sequ b n s
 {-# INLINE embed #-}
 embed = \case
     FlatF flt -> Flat flt
-    VariantF s l r x -> Variant s l r x
+    VariantF s x -> Variant s x
     SequenceF l xs r -> Sequence l xs r
     MetaGtF l x r y -> MetaGT l x r y
     ParenF l x r -> Paren l x r
@@ -347,7 +347,7 @@ mapFuns funs =
         MkFuns NothingFun NothingFun NothingFun NothingFun NothingFun NothingFun -> id
         _ -> \case
             FlatF flt -> FlatF (flat flt)
-            VariantF s l r x -> VariantF (symbol s) (pos l) (pos r) x
+            VariantF s x -> VariantF (symbol s) x
             SequenceF l xs r -> SequenceF (pos l) (sequenceParts $ sequ xs) (pos r)
             MetaGtF l x r y -> MetaGtF (pos l) x (pos r) (closePin y)
             ParenF l x r -> ParenF (pos l) x (pos r)
@@ -365,7 +365,7 @@ mapFuns funs =
     flat = case (bFun, nFun, sFun, tFun, posFun) of
         (NothingFun, NothingFun, NothingFun, NothingFun, NothingFun) -> id
         _ -> \case
-            Atom s l r -> Atom (symbol s) (pos l) (pos r)
+            Atom s -> Atom (symbol s)
             Bytes b -> Bytes (bytes b)
             Number n -> Number (number n)
             Text t -> Text (text t)

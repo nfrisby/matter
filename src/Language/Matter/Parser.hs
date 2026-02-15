@@ -33,7 +33,7 @@ module Language.Matter.Parser (
 
     Bytes (..),
     Decimal,
-    Symbol (..),
+    Symbol,
     Text (..),
     Sequ (..),
     bytesAnnoSize,
@@ -68,8 +68,7 @@ bytesForget (MkBytes _byteSize b) = b
 
 type Decimal = ST.Decimal
 
-data Symbol pos = MkSymbol !(ST.Symbol X pos)
-  deriving (Eq, Functor, Show)
+type Symbol = ST.Symbol
 
 data Text pos = MkText !Pos !(ST.Text NonEmpty X pos)
   deriving (Eq, Functor, Show)
@@ -337,7 +336,7 @@ snoc l r = curry $ \case
 
     -- @
     (stk, OdToken OdAtom) ->
-        push (simplify stk) $ parseAlgebra $ ST.FlatF $ ST.Atom (MkSymbol (ST.MkSymbol MkX)) l r
+        push (simplify stk) $ parseAlgebra $ ST.FlatF $ ST.Atom $ ST.MkSymbol l r
     -- 0
     (stk, OdToken (OdIntegerPart mbSign)) ->
         Just $ Flat (IntegerPart mbSign l r) $ simplify stk
@@ -552,7 +551,7 @@ push = flip $ \m -> \case
     Flat{} ->
         Nothing
     OpenVariant l r stk ->
-        push stk $ parseAlgebra $ ST.VariantF (MkSymbol (ST.MkSymbol MkX)) l r m
+        push stk $ parseAlgebra $ ST.VariantF (ST.MkSymbol l r) m
     OpenSequence p acc stk ->
         Just $ OpenSequence p (snocMatterSequ acc $ ST.Item m) stk
     Sequence_OpenMetaEQ p1 acc p2 mb stk ->

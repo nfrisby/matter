@@ -88,5 +88,4 @@ test-suite matter-test
         matter-testlib,
         random,
         text,
-        text-short,
         vector

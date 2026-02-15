@@ -1,6 +1,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Language.Matter.Parser.Tests (tests) where
 
@@ -10,7 +11,6 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
-import Data.Text.Short qualified as TS
 import Data.Vector (Vector)
 import Data.Word (Word32)
 import GHC.Exts (fromList)
@@ -42,7 +42,7 @@ tests = do
             print sz
             g <- getStdGen
             -- TODO how to inject some unnecessary OdWhitespace tokens? Should not be adjacent to OdWhiteSpace.
-            TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: Matter Vector (Bytes X) Decimal (Symbol X) (Text NonEmpty X) P)
+            TL.putStrLn $ runStateGen_ g $ \g' -> toLazyText $ foldMap (prettyToken g') $ pretty (x :: Matter Vector (Bytes X) Decimal Symbol (Text NonEmpty X) P)
             putStrLn ""
     QC.sample' (QC.sized $ \sz -> (,) sz <$> G.generateMatter) >>= mapM_ f
 
@@ -137,107 +137,107 @@ testCases = [
 
     -- BytesAnno
 
-  , passingAnd "0x" $ \_s -> \case
+  , passingAnd "0x" $ \_inp -> \case
         Flat (Bytes b) -> Just (P.bytesAnnoSize b, 0)
         _ -> Nothing
 
-  , passingAnd "0x11223344556677" $ \_s -> \case
+  , passingAnd "0x11223344556677" $ \_inp -> \case
         Flat (Bytes b) -> Just (P.bytesAnnoSize b, 7)
         _ -> Nothing
 
-  , passingAnd "0x11 <> 0x2233 <> 0x <> 0x44" $ \_s -> \case
+  , passingAnd "0x11 <> 0x2233 <> 0x <> 0x44" $ \_inp -> \case
         Flat (Bytes b) -> Just (P.bytesAnnoSize b, 4)
         _ -> Nothing
 
     -- TextAnno
 
-  , passingAnd "\"\"" $ \_s -> \case
+  , passingAnd "\"\"" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
-  , passingAnd "'0''0'" $ \_s -> \case
+  , passingAnd "'0''0'" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
-  , passingAnd "'7''7'" $ \_s -> \case
+  , passingAnd "'7''7'" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
-  , passingAnd "'23''23'" $ \_s -> \case
+  , passingAnd "'23''23'" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
-  , passingAnd "'931''931'" $ \_s -> \case
+  , passingAnd "'931''931'" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
-  , passingAnd "'8832''8832'" $ \_s -> \case
+  , passingAnd "'8832''8832'" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
         _ -> Nothing
 
-  , passingAnd "'8832'Banana'8832'" $ \_s -> \case
+  , passingAnd "'8832'Banana'8832'" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 6 6)
         _ -> Nothing
 
-  , passingAnd "\"\" <banana> \"\"" $ \_s -> \case
+  , passingAnd "\"\" <banana> \"\"" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 6 6)
         _ -> Nothing
 
-  , passingAnd "\"\" <%F09F8D8C> \"\"" $ \_s -> \case   -- ie 🍌
+  , passingAnd "\"\" <%F09F8D8C> \"\"" $ \_inp -> \case   -- ie 🍌
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 1 4)
         _ -> Nothing
 
-  , passingAnd "\"\" <> \"euro\"" $ \_s -> \case
+  , passingAnd "\"\" <> \"euro\"" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 4 4)
         _ -> Nothing
 
-  , passingAnd "\"\" <%e282ac> \"\"" $ \_s -> \case   -- ie €
+  , passingAnd "\"\" <%e282ac> \"\"" $ \_inp -> \case   -- ie €
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 1 3)
         _ -> Nothing
 
-  , passingAnd "\"\" <%F09F8D8C> \"€\"" $ \_s -> \case
+  , passingAnd "\"\" <%F09F8D8C> \"€\"" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 2 7)
         _ -> Nothing
 
-  , passingAnd "_ <%F09F8D8C> \"€\"" $ \_s -> \case
+  , passingAnd "_ <%F09F8D8C> \"€\"" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 1 3)
         _ -> Nothing
 
-  , passingAnd "\"\" <%e282ac> \"🍌\"" $ \_s -> \case
+  , passingAnd "\"\" <%e282ac> \"🍌\"" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 2 7)
         _ -> Nothing
 
-  , passingAnd "_ <%e282ac> \"🍌\"" $ \_s -> \case
+  , passingAnd "_ <%e282ac> \"🍌\"" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 1 4)
         _ -> Nothing
 
-  , passingAnd "\"€\" <> _ <banana> \"🍌\"" $ \_s -> \case
+  , passingAnd "\"€\" <> _ <banana> \"🍌\"" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 2 7)
         _ -> Nothing
 
-  , passingAnd "0x34" $ \s -> \case
+  , passingAnd "0x34" $ \inp -> \case
         Flat (Bytes bytes) ->
-            Just (I.interpretBytes s (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), Right (fromList [0x34]))
+            Just (I.interpretBytes inp (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), Right (fromList [0x34]))
         _ -> Nothing
 
-  , passingAnd "0x34110f" $ \s -> \case
+  , passingAnd "0x34110f" $ \inp -> \case
         Flat (Bytes bytes) ->
-            Just (I.interpretBytes s (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), Right (fromList [0x34, 0x11, 0x0f]))
+            Just (I.interpretBytes inp (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), Right (fromList [0x34, 0x11, 0x0f]))
         _ -> Nothing
 
-  , passingAnd "@foo" $ \s -> \case
-        Flat (Atom _s l r) ->
-            Just (I.interpretSymbol s l r, TS.pack "foo")
+  , passingAnd "@foo" $ \inp -> \case
+        Flat (Atom s) ->
+            Just (I.interpretSymbol inp s, I.shortTextSymbolValue "foo")
         _ -> Nothing
 
-  , passingAnd "#foo []" $ \s -> \case
-        Variant _s l r _ ->
-            Just (I.interpretSymbol s l r, TS.pack "foo")
+  , passingAnd "#foo []" $ \inp -> \case
+        Variant s _ ->
+            Just (I.interpretSymbol inp s, I.shortTextSymbolValue "foo")
         _ -> Nothing
 
-  , passingAnd "# []" $ \s -> \case
-        Variant _s l r _ ->
-            Just (I.interpretSymbol s l r, TS.pack "")
+  , passingAnd "# []" $ \inp -> \case
+        Variant s _ ->
+            Just (I.interpretSymbol inp s, I.shortTextSymbolValue "")
         _ -> Nothing
 
   ]
@@ -245,7 +245,7 @@ testCases = [
 data TestCase =
     forall a. (Show a, Eq a) => MkTestCase String (ParseResult -> Maybe (a, a))
   |
-    MkRoundTrip Int (Matter Vector (Bytes X) Decimal (Symbol X) (Text NonEmpty X) P)
+    MkRoundTrip Int (Matter Vector (Bytes X) Decimal Symbol (Text NonEmpty X) P)
 
 failing :: String -> TestCase
 failing s = MkTestCase s (\_ -> Nothing :: Maybe ((), ()))
@@ -322,7 +322,7 @@ prop_prettyThenParseIsSame =
     shrnk (g, m) = [ (g, m') | m' <- G.shrinkMatter m]
     noshow _ = []
 
-prop_prettyThenParseIsSame' :: (Int, Matter Vector (Bytes X) Decimal (Symbol X) (Text NonEmpty X) P) -> QC.Property
+prop_prettyThenParseIsSame' :: (Int, Matter Vector (Bytes X) Decimal Symbol (Text NonEmpty X) P) -> QC.Property
 prop_prettyThenParseIsSame' (g, m) =
     QC.counterexample ("m = " <> show m)
   $ QC.counterexample ("g = " <> show g)
@@ -351,7 +351,7 @@ prop_prettyThenParseIsSame' (g, m) =
                  ,
                    nFun = NothingFun
                  ,
-                   sFun = JustFun $ \(P.MkSymbol s) -> s
+                   sFun = NothingFun
                  ,
                    tFun = JustFun $ \(P.MkText _counts t) -> t
                  ,

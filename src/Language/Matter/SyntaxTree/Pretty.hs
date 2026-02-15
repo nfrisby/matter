@@ -39,7 +39,7 @@ consDList x y = x DNE.:| y
 pretty ::
     (Functor sequ, Foldable sequ, Foldable nesequ)
  =>
-    Matter sequ (Bytes blit) Decimal (Symbol slit) (Text nesequ tlit) pos
+    Matter sequ (Bytes blit) Decimal Symbol (Text nesequ tlit) pos
  ->
     DNonEmpty Token
 pretty =
@@ -47,7 +47,7 @@ pretty =
   where
     phi = \case
         FlatF flt -> prettyFlat flt
-        VariantF _s _l _r x -> od OdVariant <> x
+        VariantF _s x -> od OdVariant <> x
         SequenceF _l xs _r -> sd SdOpenSequ <> foldr (\x acc -> prettySequencePart x <> acc) (sd SdCloseSequ) xs
         MetaGtF _l x _r y ->
             let y' = case y of
@@ -67,7 +67,7 @@ prettySequencePart = \case
 
 prettyFlat :: Foldable nesequ => Flat (Bytes blit) Decimal slit (Text nesequ tlit) pos -> DNonEmpty Token
 prettyFlat = \case
-    Atom _s _l _r -> od OdAtom
+    Atom _s -> od OdAtom
     Bytes (BytesLit _blit _l _r more) -> OdToken OdBytes `consDList` prettyMoreBytes more
     Number (DecimalLit mbSign _l _r fractionPart exponentPart) ->
         let x = case fractionPart of

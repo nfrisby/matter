@@ -5,8 +5,14 @@
 {-# LANGUAGE PatternSynonyms #-}
 
 module Language.Matter.Interpreter (
-    -- * Flats
+    -- * Symbol
+    SymbolValue,   -- opaque
     interpretSymbol,
+    shortTextSymbolValue,
+    symbolValueText,
+    textSymbolValue,
+
+    -- * Bytes
     interpretBytes,
     interpretBytesLit,
 
@@ -23,9 +29,11 @@ module Language.Matter.Interpreter (
 import Control.Monad.ST (runST)
 import Control.Monad.Trans.State qualified as State
 import Data.Bits ((.|.), (.>>.))
+import Data.Function (on)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Primitive.ByteArray qualified as BA
+import Data.Text qualified as T
 import Data.Text.Internal qualified as TI
 import Data.Text.Short qualified as TS
 import Data.Word (Word8, Word32)
@@ -33,13 +41,41 @@ import GHC.Exts qualified as GHC
 import GHC.Word qualified as GHC
 
 import Language.Matter.SyntaxTree
-import Language.Matter.Tokenizer (MatterStream (slice, sliceShort), Pos (..))
+import Language.Matter.Tokenizer (MatterStream (slice), Pos (..))
+
+data SymbolValue =
+      -- | Preferable when creating them programmatically
+      ShortTextSV !TS.ShortText
+    |
+      -- | Preferable when slicing them from a source file
+      TextSV !T.Text
+
+shortTextSymbolValue :: TS.ShortText -> SymbolValue
+shortTextSymbolValue = ShortTextSV
+
+textSymbolValue :: T.Text -> SymbolValue
+textSymbolValue = TextSV
+
+symbolValueText :: SymbolValue -> T.Text
+{-# INLINE symbolValueText #-}
+symbolValueText = \case
+    ShortTextSV t -> TS.toText t
+    TextSV t -> t
+
+instance Eq SymbolValue where (==) = (==) `on` symbolValueText
+instance Ord SymbolValue where compare = compare `on` symbolValueText
+instance Show SymbolValue where
+    showsPrec p = \case
+        ShortTextSV t -> showsPrec p t
+        TextSV t -> showsPrec p t
 
 -- | Useful both for 'Atom' and 'Varinant'
-interpretSymbol :: MatterStream inp => inp -> Pos -> Pos -> TS.ShortText
-interpretSymbol inp l r =
+interpretSymbol :: MatterStream inp => inp -> Symbol Pos -> SymbolValue
+interpretSymbol inp (MkSymbol l r) =
     -- skip the @ or the #
-    sliceShort (l <> MkPos 1 1) r inp
+    TextSV $ slice (l <> MkPos 1 1) r inp
+
+----
 
 interpretBytes :: MatterStream inp => inp -> Maybe Word32 -> Bytes blit Pos -> Either String BA.ByteArray
 interpretBytes inp mbByteSize top =
@@ -121,7 +157,7 @@ pattern SnocPath path turn <-
 -- | Each possible turn when descending into a 'Matter' value
 data Turn =
     -- | #foo A
-    VariantTurn !TS.ShortText
+    VariantTurn {-# UNPACK #-} !SymbolValue
   |
     -- | [ ... A ... ], with a count of predecessors (aka index)
     ItemTurn !Word32 !Word32
@@ -198,21 +234,21 @@ pathLength = Map.size . pathMap
 -- paths to the 'BothPins' arguments involve two additional turns, so
 -- 'SnocPath' has been called twice for each.
 pathedFmap ::
-    (MatterStream inp, Traversable sequ)
+    Traversable sequ
  =>
-    inp
+    (s pos -> SymbolValue)
  ->
     Path
  ->
     (Path -> a -> a')
  ->
-    MatterF sequ b n s t Pos a
+    MatterF sequ b n s t pos a
  ->
-    MatterF sequ b n s t Pos a'
+    MatterF sequ b n s t pos a'
 {-# INLINE pathedFmap #-}
-pathedFmap inp path f = \case
+pathedFmap symbol path f = \case
     FlatF flt -> FlatF flt
-    VariantF s l r x -> VariantF s l r $ flip f x $ SnocPath path $ VariantTurn $ interpretSymbol inp l r
+    VariantF s x -> VariantF s $ flip f x $ SnocPath path $ VariantTurn $ symbol s
     SequenceF p1 xs p2 -> SequenceF p1 (go xs) p2
     MetaGtF p1 x p2 y ->
         MetaGtF p1 (flip f x $ SnocPath path MetaGtTurn) p2 $ case y of
@@ -242,19 +278,19 @@ data W32W32 = MkW32W32 !Word32 !Word32
 
 -- | Like 'fold' but also applies the appropriate 'Turn's to the 'Path'
 pathedFold ::
-    (MatterStream inp, Traversable sequ)
+    Traversable sequ
  =>
-    (Path -> MatterF sequ b n s t Pos a -> a)
+    (s pos -> SymbolValue)
  ->
-    inp
+    (Path -> MatterF sequ b n s t pos a -> a)
  ->
     Path
  ->
-    Matter sequ b n s t Pos
+    Matter sequ b n s t pos
  ->
     a
 {-# INLINE pathedFold #-}
-pathedFold phi inp =
+pathedFold slit phi =
     go
   where
-    go !path = phi path . pathedFmap inp path go . project
+    go !path = phi path . pathedFmap slit path go . project
