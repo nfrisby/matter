@@ -6,6 +6,7 @@
 module Language.Matter.Parser.Tests (tests) where
 
 import Control.Monad (foldM, unless)
+import Control.Monad.Trans.Except (Except, throwE)
 import Data.Functor ((<&>))
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
@@ -235,12 +236,105 @@ testCases = [
             Just (I.interpretSymbol inp s, I.shortTextSymbolValue "foo")
         _ -> Nothing
 
+  , passingAnd "@" $ \inp -> \case
+        Flat (Atom s) ->
+            Just (I.interpretSymbol inp s, I.shortTextSymbolValue "")
+        _ -> Nothing
+
   , passingAnd "# []" $ \inp -> \case
         Variant s _ ->
             Just (I.interpretSymbol inp s, I.shortTextSymbolValue "")
         _ -> Nothing
 
+  , passingAnd (show (negate 1 + toInteger (minBound :: Int))) $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, throwE I.OutOfRange :: Except I.BadDecimal Int)
+        _ -> Nothing
+
+  , passingAnd (show (toInteger (minBound :: Int))) $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, pure (minBound :: Int))
+        _ -> Nothing
+
+  , passingAnd "00000000000000000000000000000002937234045" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, pure (2937234045 :: Int))
+        _ -> Nothing
+
+  , passingAnd "2937234045.0000000000000000000000000000000" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, pure (2937234045 :: Int))
+        _ -> Nothing
+
+  , passingAnd "10000000000000.000000000000000001" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, throwE I.NotIntegral :: Except I.BadDecimal Int)
+        _ -> Nothing
+
+  , passingAnd "0.2937234045e10" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, pure (2937234045 :: Int))
+        _ -> Nothing
+
+  , passingAnd (show (toInteger (maxBound :: Int))) $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, pure (maxBound :: Int))
+        _ -> Nothing
+
+  , passingAnd (show (1 + toInteger (maxBound :: Int))) $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, throwE I.OutOfRange :: Except I.BadDecimal Int)
+        _ -> Nothing
+
   ]
+
+  ++ [ testIntegerNotIntegral (wlz, w, wtz) (flz, f, ftz) (elz, e)
+     | wlz <- [0 .. 2]
+     , w <- [0 .. 2]
+     , wtz <- [0 .. 2]
+     , flz <- [0 .. 2]
+     , f <- [0 .. 2]
+     , ftz <- [0 .. 2]
+     , elz <- [0 .. 2]
+     , e <- [-4 .. 4]
+     ]
+
+-- | Testing the 'Integer' instance of 'I.unsafeInterpretDecimal'
+--
+-- Leading zeros, how many whole digits, and trailing zeros
+--
+-- Leading zeros, how many fraction digits, and trailing zeros
+--
+-- Leading zeros of exponent and the actual exponent value
+testIntegerNotIntegral :: (Int, Int, Int) -> (Int, Int, Int) -> (Int, Int) -> TestCase
+testIntegerNotIntegral (wlz, w, wtz) (flz, f, ftz) (elz, e) =
+    passingAnd decstr $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, expected)
+        _ -> Nothing
+  where
+    decstr =
+        (if null wstr then "0" else wstr)
+     <>
+        (if null fstr then "" else "." <> fstr)
+     <>
+        ("e" <> estr)
+
+    wstr = replicate wlz '0' <> replicate w '1' <> replicate wtz '0'
+    fstr = replicate flz '0' <> replicate f '1' <> replicate ftz '0'
+    estr = (if e < 0 then "-" else "") <> replicate elz '0' <> show (abs e)
+
+    fracEndsUpFrac = f > 0 && e - flz - f < 0
+    wholeEndsUpFrac = w > 0 && w + wtz + e <= 0
+
+    expected =
+        if fracEndsUpFrac || wholeEndsUpFrac then throwE I.NotIntegral else
+        pure $
+            I.shiftInteger
+                (read ("0" <> replicate w '1' <> replicate wtz '0' <> replicate flz '0' <> replicate f '1') :: Integer)
+                (fromIntegral $ e - flz - f)
+
+-----
 
 data TestCase =
     forall a. (Show a, Eq a) => MkTestCase String (ParseResult -> Maybe (a, a))
@@ -253,7 +347,7 @@ failing s = MkTestCase s (\_ -> Nothing :: Maybe ((), ()))
 passing :: String -> TestCase
 passing s = MkTestCase s (\_ -> Just ((), ()))
 
-passingAnd :: (Show a, Eq a) => String  -> (String -> M -> Maybe (a, a)) -> TestCase
+passingAnd :: (Show a, Eq a) => String -> (String -> M -> Maybe (a, a)) -> TestCase
 passingAnd s f = MkTestCase s $ \case
     ParseDone m -> f s m
     ParseStuck{} -> Nothing

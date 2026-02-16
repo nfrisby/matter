@@ -45,6 +45,7 @@ library
         base ^>=4.21.0.0,
         containers,
         dlist,
+        integer-conversion,
         primitive,
         random,
         recursion-schemes,
@@ -88,4 +89,5 @@ test-suite matter-test
         matter-testlib,
         random,
         text,
+        transformers,
         vector

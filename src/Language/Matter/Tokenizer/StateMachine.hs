@@ -282,6 +282,7 @@ class MatterStream inp where
     -- | Drop characters that satisfy 'memberSetChar'
     munch :: SetChar -> inp -> MunchResult inp
 
+    -- | Inclusive lower bound, exclusive upper bound
     slice :: Pos -> Pos -> inp -> T.Text
 
 -- | An opt-in default for 'munch'

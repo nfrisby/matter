@@ -17,6 +17,11 @@ module Language.Matter.Interpreter (
     interpretBytes,
     interpretBytesLit,
 
+    -- * Decimal
+    BadDecimal (..),
+    InterpretDecimal (..),
+    unsafeInterpretDecimal,
+
     -- * Paths
     Path (EmptyPath, SnocPath),
     Turn (..),
@@ -25,13 +30,19 @@ module Language.Matter.Interpreter (
     pathMap,
     pathedFmap,
     pathedFold,
+
+    -- * Utilities
+    shiftInteger,
+
   ) where
 
-import Control.Monad.Trans.Except (Except, throwE)
+import Control.Monad (when)
 import Control.Monad.ST (runST)
+import Control.Monad.Trans.Except (Except, throwE)
 import Control.Monad.Trans.State qualified as State
 import Data.Bits ((.|.), (.>>.))
 import Data.Function (on)
+import Data.Integer.Conversion (textToInteger)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Primitive.ByteArray qualified as BA
@@ -43,7 +54,7 @@ import GHC.Exts qualified as GHC
 import GHC.Word qualified as GHC
 
 import Language.Matter.SyntaxTree
-import Language.Matter.Tokenizer (MatterStream (slice), Pos (..))
+import Language.Matter.Tokenizer (MatterStream (slice), MaybeSign (..), Pos (..), Sign (..))
 
 data SymbolValue =
       -- | Preferable when creating them programmatically
@@ -136,7 +147,130 @@ interpretBytesLit :: MatterStream inp => inp -> Pos -> Pos -> Except BadBytes BA
 interpretBytesLit inp l r =
     GHC.inline interpretBytes inp Nothing $ BytesLit MkX l r NoMoreBytes
 
--- TODO interpretNumber
+-----
+
+-- | ASSUMPTION: The 'Pos' values in the 'Decimal' are correct for
+-- @inp@.
+unsafeInterpretDecimal :: (MatterStream inp, InterpretDecimal a) => inp -> Decimal Pos -> Except BadDecimal a
+unsafeInterpretDecimal inp decimal@(DecimalLit _mbSign _l _r fpart epart) =
+    let DecimalLit mbSign l r _fpart _epart = decimal
+        wdigitsWithTrailingZeros = T.dropWhile (== '0') $ slice (l <> signWidth mbSign) r inp
+        wdigits = T.dropWhileEnd (== '0') wdigitsWithTrailingZeros
+        wshift = T.length wdigitsWithTrailingZeros - T.length wdigits
+    in
+    unsafeInterpretDecimalParts
+        mbSign wdigits wshift
+        fdigits
+        esign edigits
+  where
+    signWidth :: MaybeSign -> Pos
+    signWidth = \case
+        NothingSign -> MkPos 0 0
+        JustSign{} -> MkPos 1 1
+
+    fdigits = case fpart of
+        NothingFraction -> T.empty
+        JustFraction l r ->
+            T.dropWhileEnd (== '0')
+          $ slice (l <> MkPos 1 1) r inp   -- skip .
+
+    (esign, edigits) = case epart of
+        NothingExponent -> (NothingSign, T.empty)
+        JustExponent mbSign l r ->
+           (mbSign, slice (l <> MkPos 1 1 <> signWidth mbSign) r inp)   -- skip E and sign
+
+data BadDecimal =
+    NotIntegral
+  |
+    OutOfRange
+  |
+    NotEnoughPrecision
+  deriving (Eq, Show)
+
+class InterpretDecimal a where
+    -- | The whole parts' sign and digits without leading zeros and
+    -- without trailing zeros, how many trailing zeros the whole parts
+    -- had, fraction part's digits without trailing zeros, and
+    -- exponent part's sign and digits.
+    unsafeInterpretDecimalParts ::
+        MaybeSign -> T.Text -> Int
+     ->
+        T.Text
+     ->
+        MaybeSign -> T.Text
+     ->
+        Except BadDecimal a
+
+applySign :: Num a => MaybeSign -> a -> a
+applySign = \case
+    NothingSign -> id
+    JustSign NegSign -> negate
+    JustSign PosSign -> id
+
+getInteger :: MaybeSign -> T.Text -> Integer
+getInteger mbSign txt =
+    applySign mbSign $ textToInteger txt
+
+-- | If this shift is too negative, this will silently discard the
+-- least significant digits.
+--
+-- Use 'integralChecks' to avoid that.
+shiftInteger :: Integer -> Integer -> Integer
+shiftInteger x e = case compare e 0 of
+    LT -> div x (10 ^ negate e)
+    EQ -> x
+    GT -> x * 10 ^ e
+
+-- | Short-circuits if the decimal is 0 (regardless of exponent) or if
+-- it's a fraction.
+--
+-- TODO the exponent type should really be limited to Int
+integralChecks :: Num a => T.Text -> Int -> T.Text -> Integer -> Maybe (Except BadDecimal a)
+integralChecks wdigits wshift fdigits e
+  | T.null wdigits, T.null fdigits = Just $ pure 0
+  | not (T.null fdigits) && fromIntegral (T.length fdigits) > e = Just $ throwE NotIntegral
+  | fromIntegral (T.length wdigits + wshift) <= negate e = Just $ throwE NotIntegral
+  | otherwise = Nothing
+
+-- | ASSUMPTION: 'integralChecks' etc
+veryUnsafeInteger ::
+    MaybeSign -> T.Text -> Int
+ ->
+    T.Text
+ ->
+    MaybeSign -> T.Text
+ ->
+    Integer
+veryUnsafeInteger wsign wdigits wshift fdigits esign edigits =
+    (getInteger wsign wdigits `shiftInteger` (e + fromIntegral wshift))
+  +
+    (getInteger NothingSign fdigits `shiftInteger` (e - fcount))
+  where
+    e = getInteger esign edigits
+    fcount = fromIntegral $ T.length fdigits
+
+instance InterpretDecimal Integer where
+    unsafeInterpretDecimalParts wsign wdigits wshift fdigits esign edigits
+      | Just m <- integralChecks wdigits wshift fdigits e = m
+      | otherwise =
+        pure $ veryUnsafeInteger wsign wdigits wshift fdigits esign edigits
+      where
+        e = getInteger esign edigits
+
+instance InterpretDecimal Int where
+    unsafeInterpretDecimalParts wsign wdigits wshift fdigits esign edigits
+      | Just m <- integralChecks wdigits wshift fdigits e = m
+      | 19 < T.length wdigits + wshift + T.length fdigits = throwE OutOfRange   -- minBound and maxBound have 19 digits
+      | otherwise = do
+          -- TODO optimize
+          let i = veryUnsafeInteger wsign wdigits wshift fdigits esign edigits
+          when (i < toInteger (minBound :: Int)) $ throwE OutOfRange
+          when (i > toInteger (maxBound :: Int)) $ throwE OutOfRange
+          pure $ fromInteger i
+      where
+        e = getInteger esign edigits
+
+-----
 
 -- TODO interpretText
 
