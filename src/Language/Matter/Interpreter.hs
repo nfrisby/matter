@@ -20,6 +20,7 @@ module Language.Matter.Interpreter (
     -- * Decimal
     BadDecimal (..),
     InterpretDecimal (..),
+    interpretDecimalAsText,
     unsafeInterpretDecimal,
 
     -- * Paths
@@ -148,6 +149,16 @@ interpretBytesLit inp l r =
     GHC.inline interpretBytes inp Nothing $ BytesLit MkX l r NoMoreBytes
 
 -----
+
+interpretDecimalAsText :: MatterStream inp => inp -> Decimal Pos -> T.Text
+interpretDecimalAsText inp (DecimalLit _mbSign l wr fpart epart) =
+    slice l r inp
+  where
+    r = case epart of
+        JustExponent _mbSign' _l er -> er
+        NothingExponent -> case fpart of
+            JustFraction _l fr -> fr
+            NothingFraction -> wr
 
 -- | ASSUMPTION: The 'Pos' values in the 'Decimal' are correct for
 -- @inp@.

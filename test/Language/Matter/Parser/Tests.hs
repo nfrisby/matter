@@ -286,6 +286,21 @@ testCases = [
             Just (I.unsafeInterpretDecimal inp n, throwE I.OutOfRange :: Except I.BadDecimal Int)
         _ -> Nothing
 
+  , passingAnd "+00000012400000000.000000000061012000000000000E+000000000003000000000000000000" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.interpretDecimalAsText inp n, "+00000012400000000.000000000061012000000000000E+000000000003000000000000000000")
+        _ -> Nothing
+
+  , passingAnd "+00000012400000000.000000000061012000000000000" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.interpretDecimalAsText inp n, "+00000012400000000.000000000061012000000000000")
+        _ -> Nothing
+
+  , passingAnd "00000012400000000.000000000061012000000000000" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.interpretDecimalAsText inp n, "00000012400000000.000000000061012000000000000")
+        _ -> Nothing
+
   ]
 
   ++ [ testIntegerNotIntegral (wlz, w, wtz) (flz, f, ftz) (elz, e)
