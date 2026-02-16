@@ -220,7 +220,6 @@ testCases = [
         Flat (Bytes bytes) ->
             Just (I.interpretBytes inp (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), pure (fromList [0x34]))
         _ -> Nothing
-
   , passingAnd "0x34110f" $ \inp -> \case
         Flat (Bytes bytes) ->
             Just (I.interpretBytes inp (Just $ P.bytesAnnoSize bytes) (P.bytesForget bytes), pure (fromList [0x34, 0x11, 0x0f]))
@@ -230,17 +229,14 @@ testCases = [
         Flat (Atom s) ->
             Just (I.interpretSymbol inp s, I.shortTextSymbolValue "foo")
         _ -> Nothing
-
   , passingAnd "#foo []" $ \inp -> \case
         Variant s _ ->
             Just (I.interpretSymbol inp s, I.shortTextSymbolValue "foo")
         _ -> Nothing
-
   , passingAnd "@" $ \inp -> \case
         Flat (Atom s) ->
             Just (I.interpretSymbol inp s, I.shortTextSymbolValue "")
         _ -> Nothing
-
   , passingAnd "# []" $ \inp -> \case
         Variant s _ ->
             Just (I.interpretSymbol inp s, I.shortTextSymbolValue "")
@@ -250,37 +246,30 @@ testCases = [
         Flat (Number n) ->
             Just (I.unsafeInterpretDecimal inp n, throwE I.OutOfRange :: Except I.BadDecimal Int)
         _ -> Nothing
-
   , passingAnd (show (toInteger (minBound :: Int))) $ \inp -> \case
         Flat (Number n) ->
             Just (I.unsafeInterpretDecimal inp n, pure (minBound :: Int))
         _ -> Nothing
-
   , passingAnd "00000000000000000000000000000002937234045" $ \inp -> \case
         Flat (Number n) ->
             Just (I.unsafeInterpretDecimal inp n, pure (2937234045 :: Int))
         _ -> Nothing
-
   , passingAnd "2937234045.0000000000000000000000000000000" $ \inp -> \case
         Flat (Number n) ->
             Just (I.unsafeInterpretDecimal inp n, pure (2937234045 :: Int))
         _ -> Nothing
-
   , passingAnd "10000000000000.000000000000000001" $ \inp -> \case
         Flat (Number n) ->
             Just (I.unsafeInterpretDecimal inp n, throwE I.NotIntegral :: Except I.BadDecimal Int)
         _ -> Nothing
-
   , passingAnd "0.2937234045e10" $ \inp -> \case
         Flat (Number n) ->
             Just (I.unsafeInterpretDecimal inp n, pure (2937234045 :: Int))
         _ -> Nothing
-
   , passingAnd (show (toInteger (maxBound :: Int))) $ \inp -> \case
         Flat (Number n) ->
             Just (I.unsafeInterpretDecimal inp n, pure (maxBound :: Int))
         _ -> Nothing
-
   , passingAnd (show (1 + toInteger (maxBound :: Int))) $ \inp -> \case
         Flat (Number n) ->
             Just (I.unsafeInterpretDecimal inp n, throwE I.OutOfRange :: Except I.BadDecimal Int)
@@ -290,12 +279,10 @@ testCases = [
         Flat (Number n) ->
             Just (I.interpretDecimalAsText inp n, "+00000012400000000.000000000061012000000000000E+000000000003000000000000000000")
         _ -> Nothing
-
   , passingAnd "+00000012400000000.000000000061012000000000000" $ \inp -> \case
         Flat (Number n) ->
             Just (I.interpretDecimalAsText inp n, "+00000012400000000.000000000061012000000000000")
         _ -> Nothing
-
   , passingAnd "00000012400000000.000000000061012000000000000" $ \inp -> \case
         Flat (Number n) ->
             Just (I.interpretDecimalAsText inp n, "00000012400000000.000000000061012000000000000")
