@@ -130,15 +130,11 @@ data Joiner :: (Type -> Type) -> Type -> Type -> JOINER -> Type where
     -- | end of joiner follows anything
     --
     -- TODO would it be useful to have @SingI j@ constraint?
-    NilJoiner         :: !pos                                              -> Joiner nesequ tlit pos j
+    NilJoiner         :: !pos                                        -> Joiner nesequ tlit pos j
     -- | text only follows 'Je' and can only be followed by 'Jt'
-    ConsJoinerText    :: !tlit -> !pos -> !pos -> Joiner nesequ tlit pos Jt -> Joiner nesequ tlit pos Je
+    ConsJoinerText    :: !tlit -> !pos  -> Joiner nesequ tlit pos Jt -> Joiner nesequ tlit pos Je
     -- | some escapes only follow 'Jt' and can only be jollowed by 'Je'
-    ConsJoinerEscapes :: !(nesequ (Escape pos)) -> Joiner nesequ tlit pos Je -> Joiner nesequ tlit pos Jt
-
-data Escape pos =
-    -- | How man bytes is this code point in its UTF8 encoding?
-    MkEscape !pos !Four
+    ConsJoinerEscapes :: !(nesequ Four) -> Joiner nesequ tlit pos Je -> Joiner nesequ tlit pos Jt
 
 -----
 
@@ -162,11 +158,10 @@ deriving instance (Show pos, Show blit) => Show (MoreBytes blit pos)
 deriving instance Show pos => Show (Decimal pos)
 deriving instance Show pos => Show (MaybeFraction pos)
 deriving instance Show pos => Show (MaybeExponent pos)
-deriving instance (Show pos, Show (nesequ (Escape pos)), Show tlit) => Show (Text nesequ tlit pos)
+deriving instance (Show pos, Show (nesequ Four), Show tlit) => Show (Text nesequ tlit pos)
 deriving instance Show Quote
-deriving instance (Show pos, Show (nesequ (Escape pos)), Show tlit) => Show (MoreText nesequ tlit pos)
-deriving instance (Show pos, Show (nesequ (Escape pos)), Show tlit) => Show (Joiner nesequ tlit pos j)
-deriving instance Show pos => Show (Escape pos)
+deriving instance (Show pos, Show (nesequ Four), Show tlit) => Show (MoreText nesequ tlit pos)
+deriving instance (Show pos, Show (nesequ Four), Show tlit) => Show (Joiner nesequ tlit pos j)
 deriving instance (Show pos, Show a) => Show (SequencePart pos a)
 
 deriving instance Eq P
@@ -180,17 +175,16 @@ deriving instance (Eq pos, Eq blit) => Eq (MoreBytes blit pos)
 deriving instance Eq pos => Eq (Decimal pos)
 deriving instance Eq pos => Eq (MaybeFraction pos)
 deriving instance Eq pos => Eq (MaybeExponent pos)
-instance          (Eq pos, Eq (nesequ (Escape pos)), Eq tlit) => Eq (Text nesequ tlit pos) where
+instance          (Eq pos, Eq (nesequ Four), Eq tlit) => Eq (Text nesequ tlit pos) where
     Suppressor p1 p1' j1 txt1 == Suppressor p2 p2' j2 txt2 = p1 == p2 && p1' == p2' && joinerEquality j1 j2 && txt1 == txt2
     TextLit q1 tlit1 l1 r1 more1 == TextLit q2 tlit2 l2 r2 more2 = q1 == q2 && tlit1 == tlit2 && l1 == l2 && r1 == r2 && more1 == more2
     _ == _ = False
 deriving instance Eq Quote
-instance          (Eq pos, Eq (nesequ (Escape pos)), Eq tlit) => Eq (MoreText nesequ tlit pos) where
+instance          (Eq pos, Eq (nesequ Four), Eq tlit) => Eq (MoreText nesequ tlit pos) where
     NoMoreText == NoMoreText = True
     MoreText p1 j1 txt1 == MoreText p2 j2 txt2 = p1 == p2 && joinerEquality j1 j2 && txt1 == txt2
     _ == _ = False
-deriving instance (Eq pos, Eq (nesequ (Escape pos)), Eq tlit) => Eq (Joiner nesequ tlit pos j)
-deriving instance Eq pos => Eq (Escape pos)
+deriving instance (Eq pos, Eq (nesequ Four), Eq tlit) => Eq (Joiner nesequ tlit pos j)
 deriving instance (Eq pos, Eq a) => Eq (SequencePart pos a)
 
 deriving instance Functor Symbol
@@ -209,7 +203,6 @@ instance          Functor nesequ => Functor (MoreText nesequ t) where
     fmap f = \case
         NoMoreText -> NoMoreText
         MoreText p j t -> MoreText (f p) (mapPosJoiner f j) (fmap f t)
-deriving instance Functor Escape
 deriving instance Functor (SequencePart pos)
 
 instance          TestEquality (Joiner nesequ tlit pos) where
@@ -220,18 +213,18 @@ instance          TestEquality (Joiner nesequ tlit pos) where
         _ -> Nothing
 
 -- | Note that the arguments can have different indices
-joinerEquality :: (Eq pos, Eq (nesequ (Escape pos)), Eq tlit) => Joiner nesequ tlit pos x -> Joiner nesequ tlit pos y -> Bool
+joinerEquality :: (Eq pos, Eq (nesequ Four), Eq tlit) => Joiner nesequ tlit pos j1 -> Joiner nesequ tlit pos j2 -> Bool
 joinerEquality = curry $ \case
     (NilJoiner p1                 , NilJoiner p2                 ) -> p1 == p2
-    (ConsJoinerText t1 l1 r1 j1   , ConsJoinerText t2 l2 r2 j2   ) -> t1 == t2 && l1 == l2 && r1 == r2 && joinerEquality j1 j2
+    (ConsJoinerText t1 p1 j1      , ConsJoinerText t2 p2 j2      ) -> t1 == t2 && p1 == p2 && joinerEquality j1 j2
     (ConsJoinerEscapes escapes1 j1, ConsJoinerEscapes escapes2 j2) -> escapes1 == escapes2 && joinerEquality j1 j2
     _ -> False
 
-mapPosJoiner :: Functor nesequ => (pos -> pos') -> Joiner nesequ tlit pos x -> Joiner nesequ tlit pos' x
+mapPosJoiner :: Functor nesequ => (pos -> pos') -> Joiner nesequ tlit pos j -> Joiner nesequ tlit pos' j
 mapPosJoiner f = \case
     NilJoiner p -> NilJoiner (f p)
-    ConsJoinerText t l r j -> ConsJoinerText t (f l) (f r) (mapPosJoiner f j)
-    ConsJoinerEscapes escapes j -> ConsJoinerEscapes (fmap (fmap f) escapes) (mapPosJoiner f j)
+    ConsJoinerText t p j -> ConsJoinerText t (f p) (mapPosJoiner f j)
+    ConsJoinerEscapes escapes j -> ConsJoinerEscapes escapes (mapPosJoiner f j)
 
 -----
 

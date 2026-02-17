@@ -136,7 +136,7 @@ generateText' =
     joinerText =
         QC.sized $ \sz ->
             if sz < 2 then pure (NilJoiner MkP) else do
-            ConsJoinerText MkX MkP MkP <$> QC.resize (sz - 1) joinerEscapes
+            ConsJoinerText MkX MkP <$> QC.resize (sz - 1) joinerEscapes
 
     joinerEscapes =
         QC.sized $ \sz ->
@@ -147,10 +147,8 @@ generateText' =
                       $ ([( 9,                        pure 2  ) | 2 < sz] ++)
                       $ ([( 1, QC.choose (5, min (sz - 1) 10) ) | 5 < sz] ++)
                       $ []
-                escapes <- (NE.:|) <$> escape <*> QC.vectorOf (n - 1) escape
+                escapes <- (NE.:|) <$> generateFour <*> QC.vectorOf (n - 1) generateFour
                 ConsJoinerEscapes escapes <$> QC.resize (sz - n) joinerText
-
-    escape = MkEscape MkP <$> generateFour
 
 data SomeJoiner = forall j. MkSomeJoiner !(Joiner NonEmpty X P j)
 

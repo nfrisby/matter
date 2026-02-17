@@ -2,7 +2,9 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Language.Matter.Interpreter (
     -- * Symbol
@@ -23,6 +25,10 @@ module Language.Matter.Interpreter (
     interpretDecimalAsText,
     unsafeInterpretDecimal,
 
+    -- * Text
+    interpretText,
+    interpretTextLit,
+
     -- * Paths
     Path (EmptyPath, SnocPath),
     Turn (..),
@@ -42,6 +48,7 @@ import Control.Monad.ST (runST)
 import Control.Monad.Trans.Except (Except, throwE)
 import Control.Monad.Trans.State qualified as State
 import Data.Bits ((.|.), (.>>.))
+import Data.ByteString.Base16 qualified as B16 (decode)
 import Data.Double.Conversion.Text (toShortest)
 import Data.Function (on)
 import Data.Integer.Conversion (textToInteger)
@@ -49,6 +56,9 @@ import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Primitive.ByteArray qualified as BA
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as T (decodeUtf8', encodeUtf8)
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Builder qualified as TB
 import Data.Text.Internal qualified as TI
 import Data.Text.Read qualified as TR
 import Data.Text.Short qualified as TS
@@ -58,6 +68,7 @@ import GHC.Word qualified as GHC
 
 import Language.Matter.SyntaxTree
 import Language.Matter.Tokenizer (MatterStream (slice), MaybeSign (..), Pos (..), Sign (..))
+import Language.Matter.Tokenizer.Counting (forgetFour', valueFour)
 
 data SymbolValue =
       -- | Preferable when creating them programmatically
@@ -387,15 +398,67 @@ instance InterpretDecimal Double where
             if given `sameSigFigs` (w <> f) then Nothing else
             Just $ WasNotShortest shortest dbl
 
--- TODO instance InterpretDecimal Scientific where
+-- TODO instance InterpretDecimal Scientific, which would only
+-- necessarily lose leading zeros in whole and exponent
 --
 -- TODO etc?
 
 -----
 
--- TODO interpretText
+interpretText :: forall inp nesequ tlit.
+    (MatterStream inp, Foldable nesequ)
+ =>
+    inp -> Maybe Word32 -> Text nesequ tlit Pos -> TL.Text
+interpretText inp mbSz =
+    f . text
+  where
+    f = case mbSz of
+        Just sz -> TB.toLazyTextWith (fromIntegral sz)
+        Nothing -> TB.toLazyText
 
--- TODO interpretTextLit
+    text = \case
+        Suppressor _p _jp _j txt -> text txt
+        TextLit q _tlit l r more ->
+            moreText (TB.fromText (interpretTextLit inp q l r)) more
+
+    {-# INLINE moreText #-}
+    moreText acc = \case
+        NoMoreText -> acc
+        MoreText jp j txt -> acc <> joiner txt (jp <> MkPos 1 1) j   -- skip <
+
+    joiner :: Text nesequ tlit Pos -> Pos -> Joiner nesequ tlit Pos j -> TB.Builder
+    joiner txt l = \case
+        NilJoiner _r ->
+            text txt
+        ConsJoinerText _tlit r j' ->
+            TB.fromText (slice l r inp) <> joiner txt r j'
+        ConsJoinerEscapes escapes j' ->
+            foldr escape (\l' -> joiner txt l' j') escapes
+          $ l
+
+    escape sz k l =
+        let !l' = l <> MkPos 1 1   -- skip %
+            !n = 2 * valueFour sz   -- nibbles
+            !r = l' <> MkPos n n
+            !hextxt = slice l' r inp
+        in
+        -- TODO there's probably much simpler logic for this since we
+        -- have to go just one code point at a time
+        case B16.decode (T.encodeUtf8 hextxt) of
+            Left s -> error $ "impossible! base16 escape " <> T.unpack hextxt <> " " <> s
+            Right bs -> case T.decodeUtf8' bs of
+                Left exn -> error $ "impossible! utf8 escape " <> T.unpack hextxt <> " " <> show exn
+                Right txt' -> TB.fromText txt' <> k r
+
+interpretTextLit :: MatterStream inp => inp -> Quote -> Pos -> Pos -> T.Text
+interpretTextLit inp q l r =
+    slice (l <> MkPos nl nl) (r <> MkPos nr nr) inp
+  where
+    nr = 1 - nl   -- skip last character of delimiter
+    nl = case q of
+        DoubleQuote -> 1
+        MultiQuote delim ->
+            2 + (valueFour . forgetFour') delim
 
 -----
 

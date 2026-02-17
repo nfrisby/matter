@@ -38,6 +38,7 @@ module Language.Matter.Parser (
     Sequ (..),
     bytesAnnoSize,
     bytesForget,
+    sequForget,
     textAnnoCounts,
     textForget,
   ) where
@@ -51,7 +52,7 @@ import Data.Word (Word32)
 import GHC.Show (showSpace)
 import Language.Matter.Tokenizer (OdToken (..), Pos (..), SdToken (..), Token (..))
 import Language.Matter.Tokenizer qualified as T
-import Language.Matter.Tokenizer.Counting (MaybeSign, forgetFour', valueFour)
+import Language.Matter.Tokenizer.Counting (Four, MaybeSign, forgetFour', valueFour)
 import Language.Matter.SyntaxTree (X (..))
 import Language.Matter.SyntaxTree qualified as ST
 
@@ -70,19 +71,25 @@ type Decimal = ST.Decimal
 
 type Symbol = ST.Symbol
 
-data Text pos = MkText !Pos !(ST.Text NonEmpty X pos)
+data Text pos =
+    -- | This explcitly unpacks the 'Pos', because it's a length, and
+    -- not a position, so we don't want @'show' \@'Pos'@
+    MkText !Word32 !Word32 !(ST.Text NonEmpty X pos)
   deriving (Eq, Functor, Show)
 
 textAnnoCounts :: Text pos -> Pos
-textAnnoCounts (MkText pos _) = pos
+textAnnoCounts (MkText x y _) = MkPos x y
 
 textForget :: Text pos -> ST.Text NonEmpty X pos
-textForget (MkText _pos t) = t
+textForget (MkText _x _y t) = t
 
 data Sequ a =
     -- | Num 'ST.Item's and num 'ST.MetaEQ's
     MkSequ !Word32 !Word32 !(Vector a)
   deriving (Eq, Show, Foldable, Functor)
+
+sequForget :: Sequ a -> Vector a
+sequForget (MkSequ _nitem _nmeta xs) = xs
 
 -----
 
@@ -125,9 +132,9 @@ data Flat :: FLAT -> Type where
     -- | @<@
     OpenTextJoiner :: SingI (UT x) => !Pos -> Flat x -> Flat (Jo j)
     -- | foobar
-    JoinerText :: !Pos -> !Pos -> Flat (Jo ST.Je) -> Flat (Jo ST.Jt)
+    JoinerText :: !Pos -> Flat (Jo ST.Je) -> Flat (Jo ST.Jt)
     -- | %25
-    Escapes :: NonEmpty (ST.Escape Pos) -> Flat (Jo ST.Jt) -> Flat (Jo ST.Je)
+    Escapes :: NonEmpty Four -> Flat (Jo ST.Jt) -> Flat (Jo ST.Je)
     -- | @>@
     CloseTextJoiner :: !Pos -> Flat (Jo j) -> Flat Jc
     -- | @_@ after joiner
@@ -257,21 +264,21 @@ snoc l r = curry $ \case
     (Flat (OpenTextJoiner p fstk) stk, OdToken OdJoinerText) ->
         -- We unbox and rebox the OpenTextJoiner so that its index's
         -- JOINER type can change.
-        Just $ Flat (JoinerText l r $ OpenTextJoiner p fstk) stk
-    (Flat (OpenTextJoiner p fstk) stk, SdToken (SdJoinerEscapedUtf8 size)) ->
+        Just $ Flat (JoinerText r $ OpenTextJoiner p fstk) stk
+    (Flat (OpenTextJoiner p fstk) stk, SdToken (SdJoinerEscapedUtf8 sz)) ->
         -- We unbox and rebox the OpenTextJoiner so that its index's
         -- JOINER type can change.
-        Just $ Flat (Escapes (NE.singleton (ST.MkEscape l size)) $ OpenTextJoiner p fstk) stk
+        Just $ Flat (Escapes (NE.singleton sz) $ OpenTextJoiner p fstk) stk
     (Flat OpenTextJoiner{} _stk, _) -> Nothing
 
-    (Flat fstk@JoinerText{} stk, SdToken (SdJoinerEscapedUtf8 size)) ->
-        Just $ Flat (Escapes (NE.singleton (ST.MkEscape l size)) fstk) stk
+    (Flat fstk@JoinerText{} stk, SdToken (SdJoinerEscapedUtf8 sz)) ->
+        Just $ Flat (Escapes (NE.singleton sz) fstk) stk
     (Flat JoinerText{} _stk, _) -> Nothing
 
-    (Flat (Escapes escapes fstk) stk, SdToken (SdJoinerEscapedUtf8 size)) ->
-        Just $ Flat (Escapes (ST.MkEscape l size `NE.cons` escapes) fstk) stk
+    (Flat (Escapes escapes fstk) stk, SdToken (SdJoinerEscapedUtf8 sz)) ->
+        Just $ Flat (Escapes (sz `NE.cons` escapes) fstk) stk
     (Flat fstk@Escapes{} stk, OdToken OdJoinerText) ->
-        Just $ Flat (JoinerText l r fstk) stk
+        Just $ Flat (JoinerText r fstk) stk
     (Flat Escapes{} _stk, _) -> Nothing
 
     (_stk, SdToken SdJoinerEscapedUtf8{}) -> Nothing
@@ -473,7 +480,7 @@ newtype TA = MkTA Pos
   deriving (Monoid, Semigroup)
 
 finalizeTA :: (TA, ST.Text NonEmpty X Pos) -> Text Pos
-finalizeTA (MkTA x, txt) = MkText x txt
+finalizeTA (MkTA (MkPos x y), txt) = MkText x y txt
 
 popT :: TA -> ST.MoreText NonEmpty X Pos -> Flat T -> (TA, ST.Text NonEmpty X Pos)
 popT !anno acc = \case
@@ -489,7 +496,10 @@ textAnno (MkTA acc) mbQ (MkPos x y) pos =
     -- All of the characters in the delimiter are ASCII, so 1 code
     -- point and also 1 byte.
     nudge = case mbQ of
-        Nothing -> mempty
+        Nothing ->
+           -- for joiners, xy is the first character and pos is the >
+           -- or the %; no nudge necessary
+           mempty
         Just ST.DoubleQuote ->
             MkPos (negate 1) (negate 1)   -- ie 2 * 1 - 1
         Just (ST.MultiQuote delim) ->
@@ -516,21 +526,26 @@ popSomeJo j = \case
     fstk@JoinerText{} -> popJoJt mempty j fstk
     fstk@Escapes{} -> popJoJe mempty j fstk
 
-popJoJe :: TA -> ST.Joiner NonEmpty X Pos ST.Je -> Flat (Jo ST.Je) -> PoppedTextJoiner
+popJoJe :: (Pos -> TA) -> ST.Joiner NonEmpty X Pos ST.Je -> Flat (Jo ST.Je) -> PoppedTextJoiner
 popJoJe !janno j = \case
-    OpenTextJoiner p fstk -> PoppedTextJoiner janno p j fstk
+    OpenTextJoiner p fstk -> PoppedTextJoiner (janno (p <> MkPos 1 1)) p j fstk   -- skip <
     Escapes escapes fstk -> popJoJt (escapesAnno janno escapes) (ST.ConsJoinerEscapes (NE.reverse escapes) j) fstk
 
-escapesAnno :: TA -> NonEmpty (ST.Escape Pos) -> TA
-escapesAnno (MkTA acc) escapes =
-    MkTA $ acc <> foldMap f escapes
+escapesAnno :: (Pos -> TA) -> NonEmpty Four -> (Pos -> TA)
+escapesAnno janno escapes jp =
+    MkTA $ acc <> foldMap g escapes
   where
-    f (ST.MkEscape _pos sz) = MkPos {codePoints = 1, utf8Bytes = valueFour sz}
+    MkTA acc = janno $
+        let n = 1 + 2 * valueFour (NE.head escapes)
+        in
+        jp <> MkPos n n   -- skip '%' and the nibbles
 
-popJoJt :: TA -> ST.Joiner NonEmpty X Pos ST.Jt -> Flat (Jo ST.Jt) -> PoppedTextJoiner
+    g sz = MkPos {codePoints = 1, utf8Bytes = valueFour sz}
+
+popJoJt :: (Pos -> TA) -> ST.Joiner NonEmpty X Pos ST.Jt -> Flat (Jo ST.Jt) -> PoppedTextJoiner
 popJoJt !janno j = \case
-    OpenTextJoiner p fstk -> PoppedTextJoiner janno p j fstk
-    JoinerText l r fstk -> popJoJe (textAnno janno Nothing l r) (ST.ConsJoinerText MkX l r j) fstk
+    OpenTextJoiner l fstk -> PoppedTextJoiner (janno l) l j fstk
+    JoinerText r fstk -> popJoJe (\l -> textAnno (janno r) Nothing l r) (ST.ConsJoinerText MkX r j) fstk
 
 popBytes :: Word32 -> ST.MoreBytes X Pos -> Flat B -> ST.Flat Bytes Decimal Symbol Text Pos
 popBytes !anno acc = \case
@@ -944,7 +959,7 @@ instance Show (Flat x) where
                          (showsPrec 11 b3_a2lL)))))
     showsPrec
       a_a2lq
-      (JoinerText b1_a2lr b2_a2ls b3_a2lt)
+      (JoinerText b1_a2lr b2_a2ls)
       = showParen
           (a_a2lq >= 11)
           ((.)
@@ -953,11 +968,7 @@ instance Show (Flat x) where
                 (showsPrec 11 b1_a2lr)
                 ((.)
                    showSpace
-                   ((.)
-                      (showsPrec 11 b2_a2ls)
-                      ((.)
-                         showSpace
-                         (showsPrec 11 b3_a2lt))))))
+                   (showsPrec 11 b2_a2ls))))
     showsPrec
       a_a2lI
       (Escapes b2_a2lK b3_a2lL)

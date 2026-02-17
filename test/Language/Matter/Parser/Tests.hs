@@ -127,7 +127,7 @@ testCases = [
 
   , MkRoundTrip 0 $ Flat $ Text
       $ Suppressor MkP MkP
-            (ConsJoinerEscapes (MkEscape MkP Four1 NE.:| [MkEscape MkP Four1]) $ NilJoiner MkP)
+            (ConsJoinerEscapes (Four1 NE.:| [Four1]) $ NilJoiner MkP)
       $ TextLit DoubleQuote MkX MkP MkP
       $ NoMoreText
 
@@ -135,7 +135,7 @@ testCases = [
 
   , MkRoundTrip 0 $ Flat $ Text
       $ Suppressor MkP MkP
-          (ConsJoinerEscapes (MkEscape MkP Four2 NE.:| [MkEscape MkP Four1]) (NilJoiner MkP))
+          (ConsJoinerEscapes (Four2 NE.:| [Four1]) (NilJoiner MkP))
       $ TextLit DoubleQuote MkX MkP MkP
       $ NoMoreText
 
@@ -183,10 +183,47 @@ testCases = [
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 6 6)
         _ -> Nothing
 
+  , passingAnd "\"\" <> \"\"" $ \_inp -> \case
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 0 0)
+        _ -> Nothing
+
+  , passingAnd "\"\" <x> \"\"" $ \_inp -> \case
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 1 1)
+        _ -> Nothing
+
+  , passingAnd "\"\" <x> \"\" <x> \"\"" $ \_inp -> \case
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 2 2)
+        _ -> Nothing
+
   , passingAnd "\"\" <banana> \"\"" $ \_inp -> \case
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 6 6)
         _ -> Nothing
 
+  , passingAnd "\"\" <banana%21four> \"\"" $ \_inp -> \case
+        Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 11 11)
+        _ -> Nothing
+
+  , passingAnd "\"\" <banana%21four> \"\"" $ \inp -> \case
+        Flat (Text txt) -> Just (
+            I.interpretText
+                inp
+                (Just $ utf8Bytes $ P.textAnnoCounts txt)
+                (P.textForget txt)
+          ,
+            "banana!four"
+          )
+        _ -> Nothing
+
+  , passingAnd "'0'\"\"\"'0' <> _ <XYZ> \"first\" <|> \"second\" <.%21.%21%21.> \"third\" <> '11'\"\"\"'11'" $ \inp -> \case
+        Flat (Text txt) -> Just (
+            I.interpretText
+                inp
+                (Just $ utf8Bytes $ P.textAnnoCounts txt)
+                (P.textForget txt)
+          ,
+            "\"\"\"first|second.!.!!.third\"\"\""
+          )
+        _ -> Nothing
   , passingAnd "\"\" <%F09F8D8C> \"\"" $ \_inp -> \case   -- ie 🍌
         Flat (Text txt) -> Just (P.textAnnoCounts txt, MkPos 1 4)
         _ -> Nothing
@@ -506,15 +543,15 @@ prop_prettyThenParseIsSame' (g, m) =
     forget =
         fold $ embed
              . mapFuns MkFuns {
-                   sequFun = JustFun $ \(P.MkSequ _nitem _nmeta xs) -> xs
+                   sequFun = JustFun P.sequForget
                  ,
-                   bFun = JustFun $ \(P.MkBytes _w b) -> b
+                   bFun = JustFun P.bytesForget
                  ,
                    nFun = NothingFun
                  ,
                    sFun = NothingFun
                  ,
-                   tFun = JustFun $ \(P.MkText _counts t) -> t
+                   tFun = JustFun P.textForget
                  ,
                    posFun = JustFun $ \MkPos{} -> MkP
                  }

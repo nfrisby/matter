@@ -43,6 +43,7 @@ library
     -- other-extensions:
     build-depends:
         base ^>=4.21.0.0,
+        base16-bytestring,
         containers,
         dlist,
         double-conversion,

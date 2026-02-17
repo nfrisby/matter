@@ -93,11 +93,8 @@ prettyText = \case
 prettyJoiner :: Foldable nesequ => Joiner nesequ t pos j -> DNonEmpty Token
 prettyJoiner = \case
     NilJoiner _p -> sd SdCloseJoiner
-    ConsJoinerText _tlit _l _r j -> od OdJoinerText <> prettyJoiner j
-    ConsJoinerEscapes escapes j -> foldr (\e acc -> prettyEscape e <> acc) (prettyJoiner j) escapes
-
-prettyEscape :: Escape pos -> DNonEmpty Token
-prettyEscape (MkEscape _p sz) = sd (SdJoinerEscapedUtf8 sz)
+    ConsJoinerText _tlit _r j -> od OdJoinerText <> prettyJoiner j
+    ConsJoinerEscapes escapes j -> foldr (\sz acc -> sd (SdJoinerEscapedUtf8 sz) <> acc) (prettyJoiner j) escapes
 
 prettyQuote :: Quote -> DNonEmpty Token
 prettyQuote = \case
