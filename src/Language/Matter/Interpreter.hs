@@ -42,6 +42,7 @@ import Control.Monad.ST (runST)
 import Control.Monad.Trans.Except (Except, throwE)
 import Control.Monad.Trans.State qualified as State
 import Data.Bits ((.|.), (.>>.))
+import Data.Double.Conversion.Text (toShortest)
 import Data.Function (on)
 import Data.Integer.Conversion (textToInteger)
 import Data.Map (Map)
@@ -49,6 +50,7 @@ import Data.Map qualified as Map
 import Data.Primitive.ByteArray qualified as BA
 import Data.Text qualified as T
 import Data.Text.Internal qualified as TI
+import Data.Text.Read qualified as TR
 import Data.Text.Short qualified as TS
 import Data.Word (Word8, Word32)
 import GHC.Exts qualified as GHC
@@ -170,6 +172,7 @@ unsafeInterpretDecimal inp decimal@(DecimalLit _mbSign _l _r fpart epart) =
         wshift = T.length wdigitsWithTrailingZeros - T.length wdigits
     in
     unsafeInterpretDecimalParts
+        (interpretDecimalAsText inp decimal)
         mbSign wdigits wshift
         fdigits
         esign edigits
@@ -188,22 +191,32 @@ unsafeInterpretDecimal inp decimal@(DecimalLit _mbSign _l _r fpart epart) =
     (esign, edigits) = case epart of
         NothingExponent -> (NothingSign, T.empty)
         JustExponent mbSign l r ->
-           (mbSign, slice (l <> MkPos 1 1 <> signWidth mbSign) r inp)   -- skip E and sign
+           (
+             mbSign
+           ,
+             T.dropWhile (== '0') $ slice (l <> MkPos 1 1 <> signWidth mbSign) r inp
+           )   -- skip E and sign
 
 data BadDecimal =
     NotIntegral
   |
     OutOfRange
   |
-    NotEnoughPrecision
+    -- | This decimal (first argument) has the same closest 'Double'
+    -- (second argument) and has fewer significant figures (ie
+    -- ignoring leading zeros and also ignoring trailing zeroes in the
+    -- case of E-notation)
+    WasNotShortest !T.Text !Double
   deriving (Eq, Show)
 
 class InterpretDecimal a where
-    -- | The whole parts' sign and digits without leading zeros and
-    -- without trailing zeros, how many trailing zeros the whole parts
-    -- had, fraction part's digits without trailing zeros, and
-    -- exponent part's sign and digits.
+    -- | The entire decimal, the whole parts' sign and digits without
+    -- leading zeros and without trailing zeros, how many trailing
+    -- zeros the whole parts had, fraction part's digits without
+    -- trailing zeros, and exponent part's sign and digits.
     unsafeInterpretDecimalParts ::
+        T.Text
+     ->
         MaybeSign -> T.Text -> Int
      ->
         T.Text
@@ -261,7 +274,7 @@ veryUnsafeInteger wsign wdigits wshift fdigits esign edigits =
     fcount = fromIntegral $ T.length fdigits
 
 instance InterpretDecimal Integer where
-    unsafeInterpretDecimalParts wsign wdigits wshift fdigits esign edigits
+    unsafeInterpretDecimalParts _entire wsign wdigits wshift fdigits esign edigits
       | Just m <- integralChecks wdigits wshift fdigits e = m
       | otherwise =
         pure $ veryUnsafeInteger wsign wdigits wshift fdigits esign edigits
@@ -269,7 +282,7 @@ instance InterpretDecimal Integer where
         e = getInteger esign edigits
 
 instance InterpretDecimal Int where
-    unsafeInterpretDecimalParts wsign wdigits wshift fdigits esign edigits
+    unsafeInterpretDecimalParts _entire wsign wdigits wshift fdigits esign edigits
       | Just m <- integralChecks wdigits wshift fdigits e = m
       | 19 < T.length wdigits + wshift + T.length fdigits = throwE OutOfRange   -- minBound and maxBound have 19 digits
       | otherwise = do
@@ -280,6 +293,103 @@ instance InterpretDecimal Int where
           pure $ fromInteger i
       where
         e = getInteger esign edigits
+
+-- | There are many pitfalls when failing to distinguish between
+-- decimal fractions and IEEE 754 binary floating point numbers. This
+-- instance takes a mildly confusing approach to avoid such surprises.
+--
+-- Specifically, it fails with 'WasNotShortest' whenever there exists
+-- a shorter decimal (ie fewer significant digits, ie ignoring leading
+-- and trailing zeros) that would yield the same 'Double'. Note that
+-- over 40 years after IEEE 754 was first established, it is still
+-- quite rare for standard libraries to render floating points as the
+-- "shortest" decimal! So this is likely going to cause unpleasant
+-- friction. However, it seems worse to interpret a Matter decimal as
+-- a 'Double' that would not be rendered as that same decimal by the
+-- strict interpretation of the intuitive requirements that have
+-- motivated every non-trivial binary-to-decimal floating point
+-- rendering algorithm.
+--
+-- See algorithms such as Errol and Ryu for mapping a 'Double' to the
+-- actual ideal decimal. Grisu3 is also an option, if configured to
+-- use a falls back algorithm when it detects its output is not
+-- actually the shortest.
+--
+-- This implementation invokes the @double-conversion@ package's
+-- bindings to <https://github.com/google/double-conversion>, which
+-- seems to be maintained by Florian Loitsch, the author of the Grisu
+-- family. I've seen elsewhere that Grisu3 is not itself fully
+-- correct, but however can be configured to detect when it's
+-- incorrect and fall back to a slower, correct algorithm (eg
+-- Dragon4). I'm unsure if the @double-conversion@ Haskell package is
+-- indeed configured that way!
+--
+-- One very appealing option is this PR
+-- <https://github.com/haskell/bytestring/pull/365>, in which Lawrence
+-- Wu implements Ryu in Haskell (!), but then---unfortunately for my
+-- priorities---fudges the output to match the non-Ryu behaviors of
+-- the @base@ package's 'show' at type 'Double'. But the code in that
+-- PR nicely explains how to remove that fudge /and/ is BSD3, so I
+-- will likely eventually copy it into this package and get a nice Ryu
+-- implemenation that way.
+instance InterpretDecimal Double where
+    unsafeInterpretDecimalParts entire _wsign wdigits wshift fdigits _esign _edigits =
+        -- TODO check number of sigfigs first, to ensure the String is
+        -- small
+
+        -- Surprise! Both 'TR.rational' and the @readExponentialLimit@
+        -- function in @bytestring-lexing@ lose precision if the
+        -- mantissa has trailing zeros. Even if the mantissa is a
+        -- whole number.
+        --
+        -- Try 0.1000700 vs 0.10007. Or 3000e-60 vs 3e-57. Hell, 3e-57
+        -- doesn't end up as 3e-57, even without trailing zeros!
+        --
+        -- To avoid this, we parse into 'Rational' and them map to
+        -- 'Double'. If I had more mastery over the 'Fractional'
+        -- class, perhaps this /surprise/ would have been obvious from
+        -- the type signatures :thinking-face:.
+        --
+        -- TODO would going through 'Scientific' somehow be
+        -- preferable?
+        --
+        -- TODO surely there's a package that provides the
+        -- well-optimized /exact/ parsing function, right?
+        case (\(x, txt) -> (fromRational x, txt)) <$> TR.rational entire of
+          Left s -> error $ "Data.Text.Read.decimal @Fractional " <> s
+          Right (dbl, leftovers)
+            | not (T.null leftovers) ->
+                  error $ "Data.Text.Read.rational did not consume whole decimal "
+                    <> T.unpack leftovers <> " from " <> T.unpack entire
+            | (1/0) == dbl -> throwE OutOfRange
+            | (-1/0) == dbl -> throwE OutOfRange
+            | Just x <- check dbl ->
+                  throwE x
+            | otherwise ->
+                  pure dbl
+      where
+        -- TODO optimize this
+        --
+        -- Ryu, eg, computes (mantissa, exponent) as an integer pair,
+        -- which I could then probably much more efficiently compare
+        -- to @wdigits <> fdigits@?
+        check dbl =
+            let shortest = toShortest $ abs dbl
+
+                wf = T.takeWhile (/= 'e') shortest
+                w  = T.takeWhile (/= '.') wf
+                f  = T.drop (T.length w + 1) wf
+
+                sameSigFigs = (==) `on` T.dropAround (== '0')
+
+                given = wdigits <> T.replicate wshift (T.pack "0") <> fdigits
+            in
+            if given `sameSigFigs` (w <> f) then Nothing else
+            Just $ WasNotShortest shortest dbl
+
+-- TODO instance InterpretDecimal Scientific where
+--
+-- TODO etc?
 
 -----
 

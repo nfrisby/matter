@@ -45,6 +45,7 @@ library
         base ^>=4.21.0.0,
         containers,
         dlist,
+        double-conversion,
         integer-conversion,
         primitive,
         random,
@@ -84,6 +85,7 @@ test-suite matter-test
     main-is:          Main.hs
     build-depends:
         base ^>=4.21.0.0,
+        double-conversion,
         QuickCheck,
         matter,
         matter-testlib,

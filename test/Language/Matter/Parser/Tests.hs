@@ -7,9 +7,11 @@ module Language.Matter.Parser.Tests (tests) where
 
 import Control.Monad (foldM, unless)
 import Control.Monad.Trans.Except (Except, throwE)
+import Data.Double.Conversion.Text (toShortest)
 import Data.Functor ((<&>))
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
+import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
 import Data.Vector (Vector)
@@ -47,6 +49,7 @@ tests = do
             putStrLn ""
     QC.sample' (QC.sized $ \sz -> (,) sz <$> G.generateMatter) >>= mapM_ f
 
+    QC.quickCheckWith QC.stdArgs{QC.maxSuccess = 1000000} prop_doubleRoundTrip
     QC.quickCheckWith QC.stdArgs{QC.maxSuccess = 100000} prop_prettyThenParseIsSame
 
 -----
@@ -242,9 +245,10 @@ testCases = [
             Just (I.interpretSymbol inp s, I.shortTextSymbolValue "")
         _ -> Nothing
 
+  -- Int
   , passingAnd (show (negate 1 + toInteger (minBound :: Int))) $ \inp -> \case
         Flat (Number n) ->
-            Just (I.unsafeInterpretDecimal inp n, throwE I.OutOfRange :: Except I.BadDecimal Int)
+            Just (I.unsafeInterpretDecimal inp n, throwBadInt I.OutOfRange)
         _ -> Nothing
   , passingAnd (show (toInteger (minBound :: Int))) $ \inp -> \case
         Flat (Number n) ->
@@ -260,7 +264,7 @@ testCases = [
         _ -> Nothing
   , passingAnd "10000000000000.000000000000000001" $ \inp -> \case
         Flat (Number n) ->
-            Just (I.unsafeInterpretDecimal inp n, throwE I.NotIntegral :: Except I.BadDecimal Int)
+            Just (I.unsafeInterpretDecimal inp n, throwBadInt I.NotIntegral)
         _ -> Nothing
   , passingAnd "0.2937234045e10" $ \inp -> \case
         Flat (Number n) ->
@@ -272,9 +276,10 @@ testCases = [
         _ -> Nothing
   , passingAnd (show (1 + toInteger (maxBound :: Int))) $ \inp -> \case
         Flat (Number n) ->
-            Just (I.unsafeInterpretDecimal inp n, throwE I.OutOfRange :: Except I.BadDecimal Int)
+            Just (I.unsafeInterpretDecimal inp n, throwBadInt I.OutOfRange)
         _ -> Nothing
 
+  -- Text
   , passingAnd "+00000012400000000.000000000061012000000000000E+000000000003000000000000000000" $ \inp -> \case
         Flat (Number n) ->
             Just (I.interpretDecimalAsText inp n, "+00000012400000000.000000000061012000000000000E+000000000003000000000000000000")
@@ -286,6 +291,60 @@ testCases = [
   , passingAnd "00000012400000000.000000000061012000000000000" $ \inp -> \case
         Flat (Number n) ->
             Just (I.interpretDecimalAsText inp n, "00000012400000000.000000000061012000000000000")
+        _ -> Nothing
+
+  -- Double
+  , passingAnd "+000.1000700e-000014" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, pure (1.0007e-15 :: Double))
+        _ -> Nothing
+  , passingAnd "0.3" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, pure (0.3 :: Double))
+        _ -> Nothing
+  , passingAnd "0.3333333333333333" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, pure (0.3333333333333333 :: Double))
+        _ -> Nothing
+  , passingAnd "0.33333333333333331" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, throwBadDouble $ I.WasNotShortest "0.3333333333333333" 0.3333333333333333)
+        _ -> Nothing
+  , passingAnd "33333333333333331" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, throwBadDouble $ I.WasNotShortest "33333333333333332" 33333333333333332)
+        _ -> Nothing
+  , passingAnd (show (2 ^ (53 :: Int) :: Int)) $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, pure (9007199254740992 :: Double))
+        _ -> Nothing
+  , passingAnd (show (2 ^ (53 :: Int) + 1 :: Int)) $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, throwBadDouble $ I.WasNotShortest "9007199254740992" 9007199254740992)
+        _ -> Nothing
+  , passingAnd "1e1000" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, throwBadDouble I.OutOfRange)
+        _ -> Nothing
+  , passingAnd "-1e1000" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, throwBadDouble I.OutOfRange)
+        _ -> Nothing
+  , passingAnd "1e-1000" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, throwBadDouble $ I.WasNotShortest "0" 0)
+        _ -> Nothing
+  , passingAnd "899999999999999918767229449717619953810131273674690656206848" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, throwBadDouble $ I.WasNotShortest "9e59" 9e59)
+        _ -> Nothing
+  , passingAnd "3000e2" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, pure (300000 :: Double))
+        _ -> Nothing
+  , passingAnd "3000e-70" $ \inp -> \case
+        Flat (Number n) ->
+            Just (I.unsafeInterpretDecimal inp n, pure (3e-67 :: Double))
         _ -> Nothing
 
   ]
@@ -300,6 +359,12 @@ testCases = [
      , elz <- [0 .. 2]
      , e <- [-4 .. 4]
      ]
+
+throwBadInt :: I.BadDecimal -> Except I.BadDecimal Int
+throwBadInt = throwE
+
+throwBadDouble :: I.BadDecimal -> Except I.BadDecimal Double
+throwBadDouble = throwE
 
 -- | Testing the 'Integer' instance of 'I.unsafeInterpretDecimal'
 --
@@ -459,3 +524,16 @@ prop_prettyThenParseIsSame' (g, m) =
       $ \g' -> toLazyText
       $ foldMap (prettyToken g')
       $ pretty m
+
+prop_doubleRoundTrip :: Double -> QC.Property
+prop_doubleRoundTrip dbl =
+    QC.counterexample ("dbl = " <> show dbl)
+  $ QC.counterexample ("inp = " <> T.unpack inp)
+  $ case parseWhole inp of
+        ParseDone (Flat (Number n)) ->
+            QC.counterexample "ParseDone"
+          $ QC.counterexample ("n = " <> show n)
+          $ I.unsafeInterpretDecimal inp n QC.=== pure dbl
+        x -> QC.counterexample (show x) $ QC.property False
+  where
+    inp = toShortest dbl
