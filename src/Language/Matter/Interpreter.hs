@@ -431,10 +431,10 @@ interpretText inp mbSz =
     joiner txt l = \case
         NilJoiner _r ->
             text txt
-        ConsJoinerText _tlit r j' ->
-            TB.fromText (slice l r inp) <> joiner txt r j'
-        ConsJoinerEscapes escapes j' ->
-            foldr escape (\l' -> joiner txt l' j') escapes
+        ConsJoinerText _tlit r j ->
+            TB.fromText (slice l r inp) <> joiner txt r j
+        ConsJoinerEscapes escapes j ->
+            foldr escape (\l' -> joiner txt l' j) escapes
           $ l
 
     escape sz k l =
