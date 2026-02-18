@@ -230,7 +230,7 @@ mapPosJoiner f = \case
 
 -- | The 'F.Base' functor of 'Matter'
 data MatterF sequ b n s t pos a =
-    FlatF (Flat b n s t pos)
+    FlatF !(Flat b n s t pos)
   |
     VariantF !(s pos) a
   |
