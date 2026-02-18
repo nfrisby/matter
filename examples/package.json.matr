@@ -1,0 +1,88 @@
+[
+  #name @my-complex-project
+  #version [2 5 1]
+  #description _
+    < > "A comprehensive project showcasing advanced"
+    < > "package.json features for a modern JS library."
+  #author  _
+    <%0a> "Jane Doe"
+    <%0a> "<jane.doe@example.com>"
+    <%0a> "(https://example.com)"
+  #license @MIT
+  #private @false
+  #repository [
+      #type @git
+      #url "https://github.com"
+    ]
+  #keywords [
+      @node
+      @npm
+      @complex
+      @build-tools
+    ]
+  #main "./lib/index.js"
+  #module "./lib/index.mjs"
+  #types "./lib/index.d.ts"
+  #exports [
+      ["." [
+          #import "./lib/index.mjs"
+          #require "./lib/index.js"
+          #types "./lib/index.d.ts"
+        ]]
+      {> "I don't know what this one does."
+      >} ["./package.json" "./package.json"]
+  ]
+  #files [
+    "lib"
+    "src"
+    "CHANGELOG.md"
+    "LICENSE"
+  ]
+  #scripts [
+      #clean "rimraf lib"
+      #prebuild "npm run clean && echo 'Starting build'"
+      #build "babel src --out-dir lib"
+      #postbuild "echo 'Build complete'"
+      #watch "babel src --out-dir lib --watch"
+      #test "jest"
+      #coverage "jest --coverage"
+      #lint "eslint src"
+      #start "node lib/index.js"
+      #prepublishOnly "npm run build"
+    ]
+  #dependencies [
+      #axios "^1.0.0"
+      #express "^4.18.2"
+      #lodash "^4.17.21"
+    ]
+  #devDependencies [
+      #@babel/cli "^7.23.4"
+      #@babel/core "^7.23.7"
+      #@babel/preset-env "^7.23.8"
+      #eslint (^ "^8.56.0") {< "56, lol. Imagine." <}
+      #jest "^29.7.0"
+      #rimraf "^5.0.5"
+    ]
+  {= {> "I'm disabling this for now. -NSF"
+  >} #peerDependencies [
+      #react ">=16.8.0"
+      #react-dom ">=16.8.0"
+    ]
+  =}
+  #engines [
+      #node ">=14.0.0"
+      #npm ">=6.0.0"
+    ]
+  #browserslist [
+      "last 2 major versions"
+      "not dead"
+    ]
+  #config [
+      #port 8080
+    ]
+  #signature {> "4 times 32 bytes" >} 0x
+    <> 0x68dadf568bbbad04dcbe5e6443bc6a3f
+    <> 0x0602beab7efaf614c5b966f58beba4e8
+    <> 0x62ef9339499d80bb483a665d5b859223
+    <> 0x6e2b4d027a3dd09c4078b54bc285a031
+]

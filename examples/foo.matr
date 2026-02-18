@@ -1,0 +1,15 @@
+#cabal [
+
+#library [
+  #name @foo
+  #version {> "bogus" >} ['0'abc'0' <, > "xyz" 300e-9]
+  #hs-source-dir "src/"
+]
+
+#executable [
+  #name @bar
+  #hs-source-dir "app/"
+  #main-is "Main.hs"
+]
+
+]

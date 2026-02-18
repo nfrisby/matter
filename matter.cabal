@@ -29,6 +29,7 @@ common warnings
 library
     import:           warnings
     exposed-modules:
+        Language.Matter.Html
         Language.Matter.Interpreter
         Language.Matter.Parser
         Language.Matter.SyntaxTree
@@ -44,6 +45,7 @@ library
     build-depends:
         base ^>=4.21.0.0,
         base16-bytestring,
+        blaze-html,
         containers,
         dlist,
         double-conversion,
@@ -94,3 +96,14 @@ test-suite matter-test
         text,
         transformers,
         vector
+
+executable matter-html
+    import:           warnings
+    default-language: Haskell2010
+    hs-source-dirs:   app
+    main-is:          Main.hs
+    build-depends:
+        base ^>=4.21.0.0,
+        blaze-html,
+        matter,
+        text,
