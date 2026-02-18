@@ -72,10 +72,10 @@ prettyFlat = \case
     Number (DecimalLit mbSign _l _r fractionPart exponentPart) ->
         let x = case fractionPart of
                 NothingFraction -> mempty
-                JustFraction _l _r -> od' OdFractionPart
+                JustFraction _r -> od' OdFractionPart
             y = case exponentPart of
                 NothingExponent -> mempty
-                JustExponent mbSign' _l _r -> od' (OdExponentPart mbSign')
+                JustExponent mbSign' _r -> od' (OdExponentPart mbSign')
         in
         OdToken (OdIntegerPart mbSign) `consDList` (x <> y)
     Text txt -> prettyText txt

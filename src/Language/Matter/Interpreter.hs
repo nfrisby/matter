@@ -168,15 +168,15 @@ interpretDecimalAsText inp (DecimalLit _mbSign l wr fpart epart) =
     slice l r inp
   where
     r = case epart of
-        JustExponent _mbSign' _l er -> er
+        JustExponent _mbSign' er -> er
         NothingExponent -> case fpart of
-            JustFraction _l fr -> fr
+            JustFraction fr -> fr
             NothingFraction -> wr
 
 -- | ASSUMPTION: The 'Pos' values in the 'Decimal' are correct for
 -- @inp@.
 unsafeInterpretDecimal :: (MatterStream inp, InterpretDecimal a) => inp -> Decimal Pos -> Except BadDecimal a
-unsafeInterpretDecimal inp decimal@(DecimalLit _mbSign _l _r fpart epart) =
+unsafeInterpretDecimal inp decimal@(DecimalLit _mbSign _l wr fpart epart) =
     let DecimalLit mbSign l r _fpart _epart = decimal
         wdigitsWithTrailingZeros = T.dropWhile (== '0') $ slice (l <> signWidth mbSign) r inp
         wdigits = T.dropWhileEnd (== '0') wdigitsWithTrailingZeros
@@ -193,19 +193,20 @@ unsafeInterpretDecimal inp decimal@(DecimalLit _mbSign _l _r fpart epart) =
         NothingSign -> MkPos 0 0
         JustSign{} -> MkPos 1 1
 
-    fdigits = case fpart of
-        NothingFraction -> T.empty
-        JustFraction l r ->
-            T.dropWhileEnd (== '0')
-          $ slice (l <> MkPos 1 1) r inp   -- skip .
+    (fr, fdigits) = case fpart of
+        NothingFraction -> (wr, T.empty)
+        JustFraction r ->
+            (,) r
+          $ T.dropWhileEnd (== '0')
+          $ slice (wr <> MkPos 1 1) r inp   -- skip .
 
     (esign, edigits) = case epart of
         NothingExponent -> (NothingSign, T.empty)
-        JustExponent mbSign l r ->
+        JustExponent mbSign r ->
            (
              mbSign
            ,
-             T.dropWhile (== '0') $ slice (l <> MkPos 1 1 <> signWidth mbSign) r inp
+             T.dropWhile (== '0') $ slice (fr <> MkPos 1 1 <> signWidth mbSign) r inp
            )   -- skip E and sign
 
 data BadDecimal =

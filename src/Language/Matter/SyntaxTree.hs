@@ -92,9 +92,9 @@ data Flat b n s t pos =
 
 data Decimal pos = DecimalLit !MaybeSign !pos !pos !(MaybeFraction pos) !(MaybeExponent pos)
 
-data MaybeFraction pos = NothingFraction | JustFraction !pos !pos
+data MaybeFraction pos = NothingFraction | JustFraction !pos
 
-data MaybeExponent pos = NothingExponent | JustExponent !MaybeSign !pos !pos
+data MaybeExponent pos = NothingExponent | JustExponent !MaybeSign !pos
 
 -----
 

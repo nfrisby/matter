@@ -86,13 +86,13 @@ generateDecimal =
     <$> genMbSgn
     <*> case compare sz 2 of
             LT -> pure (NothingFraction, NothingExponent)
-            EQ -> oneof $ pure (JustFraction MkP MkP, NothingExponent) NE.:| [(,) NothingFraction <$> expo]
-            GT -> (,) (JustFraction MkP MkP) <$> expo
+            EQ -> oneof $ pure (JustFraction MkP, NothingExponent) NE.:| [(,) NothingFraction <$> expo]
+            GT -> (,) (JustFraction MkP) <$> expo
   where
     genMbSgn =
         frequency $ (4, pure $ JustSign NegSign) NE.:| [(5, pure NothingSign), (1, pure $ JustSign PosSign)]
 
-    expo = (\mbSgn -> JustExponent mbSgn MkP MkP) <$> genMbSgn
+    expo = (\mbSgn -> JustExponent mbSgn MkP) <$> genMbSgn
 
 generateBytes :: QC.Gen (Flat (Bytes X) Decimal Symbol (Text NonEmpty X) P)
 generateBytes =

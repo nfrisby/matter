@@ -123,7 +123,7 @@ data Flat :: FLAT -> Type where
     -- | 1
     IntegerPart :: !MaybeSign -> !Pos -> !Pos -> Flat I
     -- | .2
-    FractionPart :: !Pos -> !Pos -> Flat I -> Flat F
+    FractionPart :: !Pos -> Flat I -> Flat F
 
     -- | _
     Suppressor :: !Pos -> Flat U
@@ -240,11 +240,11 @@ snoc l r = curry $ \case
 
     -- all number frames and number-continuation tokens
     (Flat (IntegerPart mbSign l1 r1) stk, OdToken OdFractionPart) ->
-        Just $ Flat (FractionPart l r $ IntegerPart mbSign l1 r1) stk
-    (Flat (FractionPart l2 r2 (IntegerPart mbSign1 l1 r1)) stk, OdToken (OdExponentPart mbSign)) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number $ ST.DecimalLit mbSign1 l1 r1 (ST.JustFraction l2 r2) (ST.JustExponent mbSign l r)
+        Just $ Flat (FractionPart r $ IntegerPart mbSign l1 r1) stk
+    (Flat (FractionPart r2 (IntegerPart mbSign1 l1 r1)) stk, OdToken (OdExponentPart mbSign)) ->
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number $ ST.DecimalLit mbSign1 l1 r1 (ST.JustFraction r2) (ST.JustExponent mbSign r)
     (Flat (IntegerPart mbSign1 l1 r1) stk, OdToken (OdExponentPart mbSign)) ->
-        push stk $ parseAlgebra $ ST.FlatF $ ST.Number $ ST.DecimalLit mbSign1 l1 r1 ST.NothingFraction (ST.JustExponent mbSign l r)
+        push stk $ parseAlgebra $ ST.FlatF $ ST.Number $ ST.DecimalLit mbSign1 l1 r1 ST.NothingFraction (ST.JustExponent mbSign r)
 
     (_stk, OdToken OdFractionPart) -> Nothing
     (_stk, OdToken OdExponentPart{}) -> Nothing
@@ -462,7 +462,7 @@ pop = \case
 popFlat :: MatterParse a => Flat x -> Maybe a
 popFlat = \case
     IntegerPart mbSign l r -> Just $ parseAlgebra $ ST.FlatF $ ST.Number $ ST.DecimalLit mbSign l r ST.NothingFraction ST.NothingExponent
-    FractionPart l2 r2 (IntegerPart mbSign l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number $ ST.DecimalLit mbSign l1 r1 (ST.JustFraction l2 r2) ST.NothingExponent
+    FractionPart r2 (IntegerPart mbSign l1 r1) -> Just $ parseAlgebra $ ST.FlatF $ ST.Number $ ST.DecimalLit mbSign l1 r1 (ST.JustFraction r2) ST.NothingExponent
     Suppressor{} -> Nothing
     x@Text{} -> Just $ parseAlgebra $ ST.FlatF $ ST.Text $ finalizeTA $ popT mempty ST.NoMoreText x
     OpenTextJoiner{} -> Nothing
@@ -905,7 +905,7 @@ instance Show (Flat x) where
            showsPrec 11 x
     showsPrec
       a_a2lq
-      (FractionPart b1_a2lr b2_a2ls b3_a2lt)
+      (FractionPart b1_a2lr b2_a2ls)
       = showParen
           (a_a2lq >= 11)
           ((.)
@@ -914,11 +914,9 @@ instance Show (Flat x) where
                 (showsPrec 11 b1_a2lr)
                 ((.)
                    showSpace
-                   ((.)
+                   (
                       (showsPrec 11 b2_a2ls)
-                      ((.)
-                         showSpace
-                         (showsPrec 11 b3_a2lt))))))
+                      ))))
     showsPrec
       a_a2lu
       (Suppressor b1_a2lv)
