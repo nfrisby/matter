@@ -1,5 +1,5 @@
 # Revision history for matter
 
-## 0.1.0.0 -- YYYY-mm-dd
+## next release
 
 * First version. Released on an unsuspecting world.
