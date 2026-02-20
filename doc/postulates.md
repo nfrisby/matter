@@ -17,9 +17,9 @@ Human readers and tokenizers merely need to lookahead at most one extra characte
 - Any Matter starting with `"`, `'`, or `_` is text.
 - Any Matter starting with `#` is a variant.
 - Any Matter starting with `[` a sequence.
-- Any Matter starting with `{>` a meta term that will be immeidately followed by a normal term.
+- Any Matter starting with `{>` a meta term that will be immediately followed by a normal term.
 - Any Matter starting with `(^` is a normal term that will be immediately followed by a meta term, which will start with `) {<`.
-- Any Matter starting with `{=` a meta term somewhere within a sequence.
+- Any Matter starting with `{=` is a meta term somewhere within a sequence.
 - Other than `(^`, any Matter starting with `(` is merely a parenthesized term.
 
 ## Some text is code: atoms and variants
@@ -44,7 +44,7 @@ That's no different than any other serialization language, except that some migh
 The common idiom for tagged unions in JSON, for example, is to include a distinguished property with a name like `"type"` or `"kind"` or some such.
 Variants and atoms simply reify that pattern to a language construct and so shed the choice of a distinguished property name.
 
-You can write Matter with a type property instead of variants.
+You can write Matter with a `"type"` property instead of variants.
 In some use cases, it's preferable that the presence/absence of various subsets of properties determine the tag.
 That same pattern can be used with Matter, when desired.
 Another viable idiom is to eschew variants entirely and instead use atoms as in [S-expressions](https://en.wikipedia.org/wiki/S-expression): `[@* 2 [@+ 4 0.9]]`.
@@ -52,7 +52,7 @@ Another viable idiom is to eschew variants entirely and instead use atoms as in 
 There is one unfortunate pitfall to atoms and variants!
 Symbols can contain any visually-obvious character.
 I don't know Unicode well enough to translate that requirement to existing predicates, so for now I'm limiting symbols just to ASCII.
-There, the visually-obvious predicate only excludes control characters, whitespace (famously _invisible_), and the backtick ` (too easily conflated with the apostrophe ').
+There, the visually-obvious predicate only excludes control characters, whitespace (famously _invisible_), and the backtick \` (too easily conflated with the apostrophe ').
 As a result, `[@bob]` is not well-formed Matter; `[@bob ]` is.
 Woof.
 
@@ -92,12 +92,12 @@ There are three meta terms in Matter.
   One common use case might be to temporarily comment out an item in a list `[ A B {= C =} D ]`.
 
 There is also a closing pin `^)` which is only allowed when there is a corresponding `{>>}` meta term, as in `{> A >} ( B ^)`.
-Note the duality with `(^` and `{<<}`: the rule is that the later piece of syntax implies/requires the earlier piece of syntax.
+Note the duality with `(^` and `{<<}`: the common rule is that the later piece of syntax implies/requires the earlier piece of syntax.
 
 - `{<<}` implies/requires `(^`.
 - `^)` implies/requires `{>>}`.
 
-To clarify, the following are all of the allowed mixtures of meta brackets, parens, and pins (where A and B and C are abbreviating _any_ Matter term).
+For the sake of clarity, the following are all of the allowed mixtures of meta brackets, parens, and pins (where A and B and C are abbreviating _any_ Matter term).
 
 - `{> A >}    B`
 - `{> A >} (  B  )`
@@ -114,7 +114,7 @@ Meta terms seem elegant and simultaneously excessive.
 
 - At the very least, they're a nice way to accommodate comments without whitespace/reformatting/etc possibly confusing which term the comment is about.
 - I also imagine them as input commands to Matter (pre)processors, like formatting tools, macro expanders, etc.
-- Lastly, I occasionally want my comments to have some apparent structure; with meta terms, that structure can simply be Matter.
+- Lastly, I occasionally want the comments I write to have some apparent structure; with meta terms, that structure can simply be Matter.
 
 ## Navigation is important: well-established outer brackets
 
@@ -125,7 +125,7 @@ Except for text literals' quotes, all of the pairs of tokens that surround Matte
 - sequences `[]`
 - joiners `<>`
 
-Because of that choice, many text editors' features will apply.
+Because of that choice, some features of text editors will automagically apply.
 For example, accelerator keystrokes will jump across the entire Matter term, from one well-established bracket character to the other.
 
 ## Escapes aren't literal: multiquotes
@@ -140,10 +140,9 @@ They are allowed in _joiner text_, which will be discussed in another postulate 
 "He shouted " <%23> "Hack the planet!" <%23> "out the car window."
 ```
 
-But Joiners are not the only option.
-Matter also provides the quirky but lighterweight option to use an exotic quote for the text literal.
-These are called _multiquotes_ in contrast to doublequotes.
-A multiquote is 'A' 'AB' 'ABC' or 'ABCD' where A B C and D are any decimal digit.
+But joiners are not the only option.
+Matter also provides the quirky but lighterweight option to use an exotic quote for the text literal, called _multiquotes_ in contrast to doublequotes.
+A multiquote is `'A'` `'AB'` `'ABC'` or `'ABCD'` where A B C and D are any decimal digit.
 
 ```
 '0'"He shouted "Hack the planet!" out the car window.'0'
@@ -152,28 +151,28 @@ A multiquote is 'A' 'AB' 'ABC' or 'ABCD' where A B C and D are any decimal digit
 
 '666'Quoth the Raven "Nevermore."'666'
 
-'0000'I hear "I love you / I know" got 1'000'000 laughes in Switzerland.'0000'
+'0000'I hear "I just want her telephone number." got 1'000'000 laughes in Switzerland.'0000'
 ```
 
 There are 11110 different multiquotes.
-Only an adverarial (and long!, 43210+ characters) text literal would contain all of them, and so at least one multiquote would be compatible for essentially any text literal an honest Matter user would want to write.
+Only an adversarial (and long!, 43210+ characters) text literal would contain all of them, and so at least one multiquote would be compatible for essentially any text literal an honest Matter user would want to write.
 
 Rest assured that multiquotes are optional.
-But they're an easy enough to provide the option to the user: a small burden on the tokenizer and arguably self-explanatory.
+But they're an easy enough option to provide for the user; a small burden on the tokenizer and mosts uses will be self-explanatory.
 
-## Byte arrays are neither numbers nor text
+## Bytes are neither numbers nor text
 
 In many languages `0xFF` can be written as an integer literal (equivalent to 255).
 
-In Matter, `0xFF` is not a number, but rather instead a length-one byte array.
+In Matter, `0xFF` is not a number, but rather instead a length-one array of bytes.
 `0xBeeF` is length two, `0x` is length zero, and so on.
 
 Sam Hughes lists some helpful reference tables at the brilliant https://github.com/qntm/base65536 repository.
 In a UTF-8 encoded Matter file, hexadecimal stores bytes at 50% efficiency (ignoring the fixed `0x` overhead).
-It's not great, but it's also not tremendous.
+It's not excellent, but it's also not disastrous.
 (UTF-16 is 25% efficient, but it's also very uncommon.)
 Recall that Matter is a human-readable format, so bytes won't usually be that long anyway---it's likely just hashes or keys.
-And if the user does need an onerous length of bytes, they can always fallback to #base64 "…" instead etc.
+And if the user does need an onerous length of bytes, they can always fallback to `#base64 "…"`, referring to an attached binary file, etc.
 
 ## Unordered is unreal: only sequences
 
@@ -196,16 +195,19 @@ Humans read and write decimals in idiomatic ways, and therefore Matter preserves
 
 A medical professional might be legally required to write `1.30` instead of `1.3`.
 A ticker tape might share that "The stock is +5 today."
-An table of numbers might justify all exponents to three characters, 1.7e+03.
-All of these are perfectly well-formed and unambiguous decimal fraction, but Matter users and tooling are discouraged from disregarding/discarding the _seemingly extraneous_ signs or zeros prematurely.
+A table of numbers might justify all exponents to three characters, 1.7e+03.
+All of these are perfectly well-formed and unambiguous decimal fractions to the human eye.
+Matter users and tooling are discouraged from disregarding/discarding the _seemingly_ extraneous signs or zeros prematurely.
 
 I do draw they line at fractions without any leading zeros, though :D.
 `.5` is rejected as a probable typo---`0.5` isn't a heavy burden.
-Also recall that all Matter decimals begin with a sign or a digit.
+Also recall that Matter decimals must begin with a sign or a digit.
 
-Tooling should carefully reject Matter input if the tooling is unable to almost surely interpret the given decimal how the user intended.
-For example, tooling that interprets decimals as IEE 754 binary should reject a decimal that has different significant figures than the "shortest" rendering of the interpreted IEEE 754 binary back into decimal.
-It's very likely that user did not realize that tool wouldn't be able to preserve exact decimal they wrote (eg they're unaware of IEEE 754 and that there are very few decimal fractions that it can represent _exactly_).
+Matter tooling should carefully reject input if the tooling is unable to almost surely interpret the given decimal how the user intended.
+For example, tooling that interprets decimals as IEEE 754 binary should reject a decimal that has different significant figures than the "shortest" rendering of the interpreted IEEE 754 binary back into decimal.
+It's very likely that user did not realize that tool wouldn't be able to preserve exact decimal they wrote (eg they're unaware of IEEE 754 binary being the default and that there are very few decimal fractions that it can represent _exactly_).
+
+TODO allow commas in long digit sequences? ... or even joiners?
 
 # Weaker Postulates
 
@@ -242,7 +244,7 @@ haskell1 =
     \"
 ```
 
-The backslashes are clearly not literal syntax, but are necessarily to distinguish the layout of the expression itself from the indentation in the denoted text.
+These special backslashes are clearly not part of the literal text, but are necessary to distinguish the layout of the expression itself from the indentation in the denoted text.
 YAML famously has a disastrous amount of ways to do this: > to keep the discards the newlines, | to keep them, |- to skip the final newline, etc---it only gets worse from there.
 Many familiar languages are either too restrictive or overloaded with options.
 
@@ -276,7 +278,7 @@ As a side-effect, joiners give the author the option compose their text in a way
 #joiners3
     "apples" <, > "oranges" <, and > "bananas"
 
-#joiners4 "Hello" <,%0A > "World" <> "!"
+#joiners4 "Hello" <,%0A> "World!"
 
 #joiners5
         "Flavors:"
@@ -298,16 +300,17 @@ Every joiner is composed of the following three parts: joiner delimiters, joiner
     - single quote ' is %27
     - percent % is %25
     - closing angle bracket > is %3E
-- Note that escapes might be multiple bytes, since they're _any_ UTF-8 character
+- Note that escapes might be multiple bytes, since they're _any_ UTF-8 character.
   For example, the Yuan sign ¥ is %C2A5.
   The banana emoji 🍌 is %F09F8D8C.
 - A Matter tokenizer should error out if the given nibbles do not denote a valid UTF-8 encoding of a valid Unicode code point.
   The necessary logic is much more tractable than novices expect.
 
 Joiner text and joiner escapes can be freely composed so that any joiner is either empty (ie `<>`) or contains an alternation of non-empty joiner text and non-empty runs of joiner escapes, starting with either.
-    - `<, >`
-    - `<%0A *>`
-    - `<;%0D%0A>`
+
+- `<, >`
+- `<%0A *>`
+- `<;%0D%0A>`
 
 ## Line uniformity for sequences: juxtaposition instead of commas
 
@@ -319,7 +322,7 @@ The classic example that violates this is forbidding trailing commas in sequence
 ```
 "json": [
     P,
-    Q,
+    Q
   ]
 ```
 
@@ -352,9 +355,9 @@ As a not insignificant bonus, it's nice to write row vectors `[ 1 2 3 ]` just as
 
 ## Line uniformity & Delimiters up front: suppressor
 
-The line uniformty postulate also applies to joined text and joined byte arrays.
+The line uniformity postulate also applies to joined text and joined bytes.
 
-For bytes, the empty `0x` is a sufficient tool, because bytes joiners are always empty.
+For bytes, the empty `0x` is a sufficient first-line, because bytes joiners are always empty.
 
 ```
 #matter 0x
@@ -403,7 +406,7 @@ The suppressor is instead typically only needed at the start and possibly the en
   < ,> "Scooter"
   <, and > _
   < ,> "Skeeter"
-  <> "."
+  <.> ""
 ```
 
 ## Backtracking is burdensome & Delimiters up front: suppressor
