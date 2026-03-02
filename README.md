@@ -47,7 +47,7 @@ matter =
 
 # Token grammar
 
-This specification only allows whitespace explicitly and uses `\1` as a capture group.
+This specification only allows whitespace explicitly and uses `\1` as a capture group (which means it's not context-free).
 
 ```
 %ws = (" " | "\n" | "\r")+
