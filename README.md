@@ -70,12 +70,10 @@ This specification only allows whitespace explicitly and uses `\1` as a capture 
 
 %joiner =
     "<" (
-          ""
-	|
           (%joinertext (%joinerescapes %joinertext)* %joinerescapes?)
         |
           (%joinerescapes (%joinertext %joinerescapes)* %joinertext?)
-        ) ">"
+        )? ">"
 
 %joinertext = [^>%]+
 
